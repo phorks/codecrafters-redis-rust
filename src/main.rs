@@ -22,12 +22,10 @@ async fn handle_connection(mut stream: TcpStream) -> Result<(), std::io::Error> 
     let reader = BufReader::new(read);
     let mut lines = reader.lines();
     while let Some(line) = lines.next_line().await? {
-        println!("{:?}", line);
         println!("Received {:?}", line);
         match line.as_str() {
             "ping" => {
                 write.write_all(b"+PONG\r\n").await?;
-                break;
             }
             _ => continue,
         }
