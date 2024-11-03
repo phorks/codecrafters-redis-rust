@@ -1,6 +1,8 @@
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
 use tokio::net::{TcpListener, TcpStream};
@@ -42,10 +44,83 @@ impl RespMessage {
 }
 
 #[derive(Debug)]
+struct SetCommandOptions {
+    ex: Option<u64>, // seconds -- Set the specified expire time, in seconds (a positive integer).
+    px: Option<u64>, // milliseconds -- Set the specified expire time, in milliseconds (a positive integer).
+    exat: Option<u64>, // timestamp-seconds -- Set the specified Unix time at which the key will expire, in seconds (a positive integer).
+    pxat: Option<u64>, // timestamp-milliseconds -- Set the specified Unix time at which the key will expire, in milliseconds (a positive integer).
+    nx: bool,          // -- Only set the key if it does not already exist.
+    xx: bool,          // -- Only set the key if it already exists.
+    keepttl: bool,     // -- Retain the time to live associated with the key.
+    get: bool, // -- Return the old string stored at key, or nil if key did not exist. An error is returned and SET aborted if the value stored at key is not a string.
+}
+
+impl SetCommandOptions {
+    fn from_rest_params(params: Vec<String>) -> anyhow::Result<SetCommandOptions> {
+        let mut ex = None;
+        let mut px = None;
+        let mut exat = None;
+        let mut pxat = None;
+        let mut nx = false;
+        let mut xx = false;
+        let mut keepttl = false;
+        let mut get = false;
+
+        let mut it = params.iter();
+        while let Some(param) = it.next() {
+            if param.eq_ignore_ascii_case("ex") {
+                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                    ex = Some(val);
+                } else {
+                    anyhow::bail!("Invalid ex parameter");
+                }
+            } else if param.eq_ignore_ascii_case("px") {
+                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                    px = Some(val);
+                } else {
+                    anyhow::bail!("Invalid px parameter");
+                }
+            } else if param.eq_ignore_ascii_case("exat") {
+                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                    exat = Some(val);
+                } else {
+                    anyhow::bail!("Invalid exat parameter");
+                }
+            } else if param.eq_ignore_ascii_case("pxat") {
+                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                    pxat = Some(val);
+                } else {
+                    anyhow::bail!("Invalid pxat parameter");
+                }
+            } else if param.eq_ignore_ascii_case("nx") {
+                nx = true;
+            } else if param.eq_ignore_ascii_case("xx") {
+                xx = true;
+            } else if param.eq_ignore_ascii_case("keepttl") {
+                keepttl = true;
+            } else if param.eq_ignore_ascii_case("get") {
+                get = true;
+            }
+        }
+
+        Ok(SetCommandOptions {
+            ex,
+            px,
+            exat,
+            pxat,
+            nx,
+            xx,
+            keepttl,
+            get,
+        })
+    }
+}
+
+#[derive(Debug)]
 enum Command {
     Ping,
     Echo(String),
-    Set(String, String),
+    Set(String, String, SetCommandOptions),
     Get(String),
 }
 
@@ -68,6 +143,18 @@ impl Command {
             } else {
                 Ok(String::new())
             }
+        }
+
+        async fn read_rest_params<T>(lines: &mut Lines<T>, n: usize) -> anyhow::Result<Vec<String>>
+        where
+            T: AsyncBufReadExt + Unpin,
+        {
+            let mut params = Vec::with_capacity(n);
+            for _ in 0..n {
+                params.push(read_param(lines).await?);
+            }
+
+            Ok(params)
         }
 
         let mut lines = read.lines();
@@ -105,7 +192,10 @@ impl Command {
             let key = read_param(&mut lines).await?;
             let value = read_param(&mut lines).await?;
 
-            return Ok(Command::Set(key, value));
+            let rest_params = read_rest_params(&mut lines, n_params - 2).await?;
+            let options = SetCommandOptions::from_rest_params(rest_params)?;
+
+            return Ok(Command::Set(key, value, options));
         } else if name.eq_ignore_ascii_case("get") {
             if n_params == 0 {
                 anyhow::bail!("Incorrect number of parameters, expected: at least 1, received 0");
@@ -117,6 +207,17 @@ impl Command {
         }
 
         anyhow::bail!("Unknown command");
+    }
+}
+
+struct StoreValue {
+    value: String,
+    expires_on: Option<SystemTime>,
+}
+
+impl StoreValue {
+    fn new(value: String, expires_on: Option<SystemTime>) -> Self {
+        StoreValue { value, expires_on }
     }
 }
 
@@ -140,7 +241,7 @@ async fn main() {
 
 async fn handle_connection(
     mut stream: TcpStream,
-    store: Arc<RwLock<HashMap<String, String>>>,
+    store: Arc<RwLock<HashMap<String, StoreValue>>>,
 ) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut reader = BufReader::new(read);
@@ -149,14 +250,40 @@ async fn handle_connection(
         let response = match command {
             Command::Ping => RespMessage::SimpleString("PONG".into()),
             Command::Echo(message) => RespMessage::BulkString(message.clone()),
-            Command::Set(key, value) => {
-                store.write().await.insert(key, value);
+            Command::Set(key, value, options) => {
+                let mut expires_on = None;
+                if let Some(px) = options.px {
+                    if let Some(t) = SystemTime::now().checked_add(Duration::from_millis(px)) {
+                        expires_on = Some(t);
+                    } else {
+                        anyhow::bail!("Invalid px");
+                    }
+                }
+                store
+                    .write()
+                    .await
+                    .insert(key, StoreValue::new(value, expires_on));
+
                 RespMessage::SimpleString("OK".into())
             }
             Command::Get(key) => {
-                let store = store.read().await;
-                let value = store.get(&key);
-                value.map_or(RespMessage::Null, |m| RespMessage::BulkString(m.clone()))
+                let r_store = store.read().await;
+                if let Some(entry) = r_store.get(&key) {
+                    if let Some(expires_on) = entry.expires_on {
+                        if expires_on < SystemTime::now() {
+                            drop(r_store);
+                            let mut w_store = store.write().await;
+                            w_store.remove(&key);
+                            RespMessage::Null
+                        } else {
+                            RespMessage::BulkString(entry.value.clone())
+                        }
+                    } else {
+                        RespMessage::BulkString(entry.value.clone())
+                    }
+                } else {
+                    RespMessage::Null
+                }
             }
         };
 
