@@ -1,4 +1,4 @@
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Debug)]
@@ -12,6 +12,22 @@ impl Command {
     where
         T: AsyncBufReadExt + Unpin,
     {
+        async fn read_param<T>(lines: &mut Lines<T>) -> anyhow::Result<String>
+        where
+            T: AsyncBufReadExt + Unpin,
+        {
+            if let Some(bytes_line) = lines.next_line().await? {
+                println!("Received line: {}", bytes_line);
+            }
+
+            if let Some(value_line) = lines.next_line().await? {
+                println!("Received line: {}", value_line);
+                Ok(value_line)
+            } else {
+                Ok(String::new())
+            }
+        }
+
         let mut lines = reader.lines();
         let Some(params_line) = lines.next_line().await? else {
             anyhow::bail!("Empty params line")
@@ -19,10 +35,7 @@ impl Command {
         println!("Received line: {}", params_line);
         let n_params = params_line.parse::<usize>()?;
 
-        _ = lines.next_line().await?;
-        let Some(name) = lines.next_line().await? else {
-            anyhow::bail!("No command name")
-        };
+        let name = read_param(&mut lines).await?;
 
         if name.eq_ignore_ascii_case("ping") {
             if n_params != 0 {
@@ -38,10 +51,7 @@ impl Command {
                 );
             }
 
-            _ = lines.next_line().await?;
-            return Ok(Command::Echo(
-                lines.next_line().await?.unwrap_or(String::new()),
-            ));
+            return Ok(Command::Echo(read_param(&mut lines).await?));
         }
 
         anyhow::bail!("Unknown command");
