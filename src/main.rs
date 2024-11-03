@@ -1,6 +1,7 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
+#[derive(Debug)]
 enum Command {
     Ping,
     Echo(String),
@@ -55,7 +56,7 @@ async fn main() {
         tokio::spawn(async move {
             match handle_connection(stream).await {
                 Ok(_) => println!("Success"),
-                Err(e) => println!("{e}"),
+                Err(e) => println!("Failed: {:?}", e),
             }
             println!("Disconnected from {addr}");
         });
@@ -66,6 +67,7 @@ async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut reader = BufReader::new(read);
     while let Ok(command) = Command::from_buffer(&mut reader).await {
+        println!("Received command: {:?}", command);
         match command {
             Command::Ping => write.write_all(b"+PONG\r\n").await?,
             Command::Echo(message) => write.write_all(message.as_bytes()).await?,
