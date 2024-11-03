@@ -1,25 +1,52 @@
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use std::borrow::BorrowMut;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 
-async fn write_resp_string<T>(write: &mut T, s: &str) -> anyhow::Result<()>
-where
-    T: AsyncWriteExt + Unpin,
-{
-    let bytes = s.as_bytes();
+enum RespMessage {
+    SimpleString(String),
+    BulkString(String),
+    Null,
+}
 
-    write.write_all(b"$").await?;
-    write.write_all(bytes.len().to_string().as_bytes()).await?;
-    write.write_all(b"\r\n").await?;
-    write.write_all(bytes).await?;
-    write.write_all(b"\r\n").await?;
+impl RespMessage {
+    async fn write<T>(self, write: &mut T) -> anyhow::Result<()>
+    where
+        T: AsyncWrite + Unpin,
+    {
+        match self {
+            RespMessage::SimpleString(s) => {
+                let bytes = s.as_bytes();
 
-    Ok(())
+                write.write_all(b"$").await?;
+                write.write_all(bytes.len().to_string().as_bytes()).await?;
+                write.write_all(b"\r\n").await?;
+                write.write_all(bytes).await?;
+                write.write_all(b"\r\n").await?;
+            }
+            RespMessage::BulkString(s) => {
+                write.write_all(b"+").await?;
+                write.write_all(s.as_bytes()).await?;
+                write.write_all(b"\r\n").await?;
+            }
+            RespMessage::Null => {
+                write.write_all(b"$-1\r\n").await?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 enum Command {
     Ping,
     Echo(String),
+    Set(String, String),
+    Get(String),
 }
 
 impl Command {
@@ -67,6 +94,26 @@ impl Command {
             }
 
             return Ok(Command::Echo(read_param(&mut lines).await?));
+        } else if name.eq_ignore_ascii_case("set") {
+            if n_params < 2 {
+                anyhow::bail!(
+                    "Incorrect number of parameters, expected: at least 2, received {}",
+                    n_params
+                );
+            }
+
+            let key = read_param(&mut lines).await?;
+            let value = read_param(&mut lines).await?;
+
+            return Ok(Command::Set(key, value));
+        } else if name.eq_ignore_ascii_case("get") {
+            if n_params == 0 {
+                anyhow::bail!("Incorrect number of parameters, expected: at least 1, received 0");
+            }
+
+            let key = read_param(&mut lines).await?;
+
+            return Ok(Command::Get(key));
         }
 
         anyhow::bail!("Unknown command");
@@ -76,11 +123,13 @@ impl Command {
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let store = Arc::new(RwLock::new(HashMap::new()));
     loop {
         let (stream, addr) = listener.accept().await.unwrap();
+        let store = store.clone();
         println!("Accepted connection from {addr}");
         tokio::spawn(async move {
-            match handle_connection(stream).await {
+            match handle_connection(stream, store).await {
                 Ok(_) => println!("Success"),
                 Err(e) => println!("Failed: {:?}", e),
             }
@@ -89,19 +138,29 @@ async fn main() {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    store: Arc<RwLock<HashMap<String, String>>>,
+) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut reader = BufReader::new(read);
     while let Ok(command) = Command::from_buffer(&mut reader).await {
         println!("Received command: {:?}", command);
-        match command {
-            Command::Ping => {
-                write.write_all(b"+PONG\r\n").await?;
+        let response = match command {
+            Command::Ping => RespMessage::SimpleString("PONG".into()),
+            Command::Echo(message) => RespMessage::BulkString(message.clone()),
+            Command::Set(key, value) => {
+                store.write().await.insert(key, value);
+                RespMessage::SimpleString("OK".into())
             }
-            Command::Echo(message) => {
-                write_resp_string(&mut write, &message).await?;
+            Command::Get(key) => {
+                let store = store.read().await;
+                let value = store.get(&key);
+                value.map_or(RespMessage::Null, |m| RespMessage::BulkString(m.clone()))
             }
-        }
+        };
+
+        response.write(&mut write).await?;
     }
 
     return Ok(());
