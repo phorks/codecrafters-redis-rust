@@ -23,11 +23,9 @@ async fn handle_connection(mut stream: TcpStream) -> Result<(), std::io::Error> 
     let mut lines = reader.lines();
     while let Some(line) = lines.next_line().await? {
         println!("Received {:?}", line);
-        match line.as_str() {
-            "ping" => {
-                write.write_all(b"+PONG\r\n").await?;
-            }
-            _ => continue,
+        if line.eq_ignore_ascii_case("ping") {
+            println!("Sent PONG");
+            write.write_all(b"+PONG\r\n").await?;
         }
     }
     return Ok(());
