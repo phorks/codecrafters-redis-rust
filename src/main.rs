@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     net::TcpListener,
 };
 
@@ -14,17 +14,17 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut _stream) => {
+            Ok(stream) => {
                 println!("accepted new connection");
-                let mut input = String::new();
-                // _stream.read_to_string(&mut input).unwrap();
-                // println!("Received {input}");
-                // match input.as_str() {
-                // "*1\r\n$4\r\nping\r\n" => {
-                _stream.write(b"+PONG\r\n").unwrap();
-                // }
-                //     _ => {}
-                // }
+                let reader = BufReader::new(&stream);
+                let mut writer = BufWriter::new(&stream);
+                for line in reader.lines() {
+                    if let Ok(_line) = line {
+                        writer.write(b"+PONG\r\n").unwrap();
+                    } else {
+                        break;
+                    }
+                }
             }
             Err(e) => {
                 println!("error: {}", e);
