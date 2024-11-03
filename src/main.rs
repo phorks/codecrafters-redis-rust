@@ -43,7 +43,7 @@ impl Command {
             }
 
             return Ok(Command::Ping);
-        } else if name.eq_ignore_ascii_case("hello") {
+        } else if name.eq_ignore_ascii_case("echo") {
             if n_params != 1 {
                 anyhow::bail!(
                     "Incorrect number of parameters, expected: 2, received {}",
