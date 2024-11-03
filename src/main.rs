@@ -1,6 +1,21 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::{TcpListener, TcpStream};
 
+async fn write_resp_string<T>(write: &mut T, s: &str) -> anyhow::Result<()>
+where
+    T: AsyncWriteExt + Unpin,
+{
+    let bytes = s.as_bytes();
+
+    write.write_all(b"$").await?;
+    write.write_all(bytes.len().to_string().as_bytes()).await?;
+    write.write_all(b"\r\n").await?;
+    write.write_all(bytes).await?;
+    write.write_all(b"\r\n").await?;
+
+    Ok(())
+}
+
 #[derive(Debug)]
 enum Command {
     Ping,
@@ -8,7 +23,7 @@ enum Command {
 }
 
 impl Command {
-    async fn from_buffer<T>(reader: &mut T) -> anyhow::Result<Command>
+    async fn from_buffer<T>(read: &mut T) -> anyhow::Result<Command>
     where
         T: AsyncBufReadExt + Unpin,
     {
@@ -28,7 +43,7 @@ impl Command {
             }
         }
 
-        let mut lines = reader.lines();
+        let mut lines = read.lines();
         let Some(params_line) = lines.next_line().await? else {
             anyhow::bail!("Empty params line")
         };
@@ -80,8 +95,12 @@ async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
     while let Ok(command) = Command::from_buffer(&mut reader).await {
         println!("Received command: {:?}", command);
         match command {
-            Command::Ping => write.write_all(b"+PONG\r\n").await?,
-            Command::Echo(message) => write.write_all(message.as_bytes()).await?,
+            Command::Ping => {
+                write.write_all(b"+PONG\r\n").await?;
+            }
+            Command::Echo(message) => {
+                write_resp_string(&mut write, &message).await?;
+            }
         }
     }
 
