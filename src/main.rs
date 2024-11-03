@@ -18,12 +18,13 @@ fn main() {
                 println!("accepted new connection");
                 let mut input = String::new();
                 _stream.read_to_string(&mut input).unwrap();
-                match input.as_str() {
-                    "*1\r\n$4\r\nping\r\n" => {
-                        _stream.write("+PONG\r\n".as_bytes()).unwrap();
-                    }
-                    _ => {}
-                }
+                println!("Received {input}");
+                // match input.as_str() {
+                // "*1\r\n$4\r\nping\r\n" => {
+                _stream.write(b"+PONG\r\n").unwrap();
+                // }
+                //     _ => {}
+                // }
             }
             Err(e) => {
                 println!("error: {}", e);
