@@ -16,6 +16,7 @@ impl Command {
         let Some(params_line) = lines.next_line().await? else {
             anyhow::bail!("Empty params line")
         };
+        println!("Received line: {}", params_line);
         let n_params = params_line.parse::<usize>()?;
 
         _ = lines.next_line().await?;
