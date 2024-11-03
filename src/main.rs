@@ -1,5 +1,8 @@
 #![allow(unused_imports)]
-use std::{fmt::Write, io::Read, net::TcpListener};
+use std::{
+    io::{Read, Write},
+    net::TcpListener,
+};
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -17,7 +20,7 @@ fn main() {
                 _stream.read_to_string(&mut input).unwrap();
                 match input.as_str() {
                     "*1\r\n$4\r\nping\r\n" => {
-                        input.write_str("+PONG\r\n").unwrap();
+                        _stream.write("+PONG\r\n".as_bytes()).unwrap();
                     }
                     _ => {}
                 }
