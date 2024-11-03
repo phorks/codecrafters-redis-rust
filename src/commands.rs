@@ -16,6 +16,7 @@ impl RespMessage {
             RespMessage::Array(items) => {
                 write.write_all(b"*").await?;
                 write.write_all(items.len().to_string().as_bytes()).await?;
+                write.write_all(b"\r\n").await?;
                 for item in items {
                     Box::pin(item.write(write)).await?;
                 }
