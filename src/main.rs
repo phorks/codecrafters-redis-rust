@@ -62,7 +62,7 @@ async fn main() {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) -> Result<(), std::io::Error> {
+async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut reader = BufReader::new(read);
     while let Ok(command) = Command::from_buffer(&mut reader).await {
