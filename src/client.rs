@@ -37,10 +37,10 @@ where
             println!("Received command: {:?}", command);
             match command {
                 Command::Ping => {
-                    RespMessage::SimpleString("PONG".into());
+                    self.write(RespMessage::SimpleString("PONG".into())).await?;
                 }
                 Command::Echo(message) => {
-                    RespMessage::BulkString(message.clone());
+                    self.write(RespMessage::BulkString(message.clone())).await?;
                 }
                 Command::Set(key, value, options) => {
                     let mut expires_on = None;
