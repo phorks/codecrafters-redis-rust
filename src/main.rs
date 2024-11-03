@@ -20,7 +20,7 @@ fn main() {
                 let mut writer = BufWriter::new(&stream);
                 for line in reader.lines() {
                     if let Ok(_line) = line {
-                        writer.write(b"+PONG\r\n").unwrap();
+                        writer.write_all(b"+PONG\r\n").unwrap();
                     } else {
                         break;
                     }
