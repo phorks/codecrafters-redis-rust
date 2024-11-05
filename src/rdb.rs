@@ -88,7 +88,9 @@ async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Str
         LengthValue::Length(length) => {
             let mut bytes = Vec::with_capacity(length as usize);
             buf.read_exact(&mut bytes).await?;
-            Ok(StringValue::Str(bytes))
+            let str = StringValue::Str(bytes);
+            println!("Read string: {}", str.to_string());
+            Ok(str)
         }
         LengthValue::IntegerAsString8 => Ok(StringValue::Int8(buf.read_u8().await?)),
         LengthValue::IntegerAsString16 => Ok(StringValue::Int16(buf.read_u16_le().await?)),
