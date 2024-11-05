@@ -14,7 +14,7 @@ mod redis;
 mod server;
 
 async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Database> {
-    let db_path = config.db_path().unwrap();
+    let db_path = config.db_path().ok_or("No rdb file provided")?;
     let mut file = fs::File::open(db_path).await?;
     let rdb = Instance::new(&mut file).await?;
 

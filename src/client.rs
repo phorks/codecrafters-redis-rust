@@ -59,17 +59,6 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     if let Some(entry) = r_store.entries.get(key) {
                         if let Some(expires_on) = entry.get_expiry_time() {
                             if expires_on < SystemTime::now() {
-                                println!(
-                                    "Entry is expired, expired on: {}, now: {}",
-                                    expires_on
-                                        .duration_since(SystemTime::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_millis() as u64,
-                                    SystemTime::now()
-                                        .duration_since(SystemTime::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_millis() as u64
-                                );
                                 drop(r_store);
                                 let mut w_store = self.store.write().await;
                                 w_store.entries.remove(key);
