@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use tokio::io::AsyncReadExt;
 
@@ -17,6 +17,7 @@ async fn skip_sequence<T: AsyncReadExt + Unpin>(buf: &mut T, str: &[u8]) -> anyh
     Ok(())
 }
 
+#[derive(Debug)]
 enum LengthValue {
     Length(usize),
     IntegerAsString8,
@@ -81,7 +82,9 @@ impl ToString for StringValue {
     }
 }
 async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<StringValue> {
-    match read_length(buf).await? {
+    let length = read_length(buf).await?;
+    println!("Read length {:?}", length);
+    match length {
         LengthValue::Length(length) => {
             let mut bytes = Vec::with_capacity(length as usize);
             buf.read_exact(&mut bytes).await?;
