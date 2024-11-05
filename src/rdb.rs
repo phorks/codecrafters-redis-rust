@@ -147,7 +147,7 @@ async fn read_section_id<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result
         0xFAu8 => Ok(SectionId::Metadata),
         0xFEu8 => Ok(SectionId::Database),
         0xFFu8 => Ok(SectionId::EndOfFile),
-        _ => anyhow::bail!("Unexpected section identifier."),
+        _ => anyhow::bail!("Unexpected section identifier: {:#x}.", id),
     }
 }
 
