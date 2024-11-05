@@ -17,6 +17,19 @@ async fn create_database_from_file(config: &ServerConfig) -> Option<Database> {
     let db_path = config.db_path()?;
     let mut file = fs::File::open(db_path).await.ok()?;
     let rdb = Instance::new(&mut file).await.ok()?;
+    println!("Initial db:");
+    let mut i = 0;
+    for db in &rdb.dbs {
+        for entry in &db.1.entries {
+            println!(
+                "DB{}: {} = {}",
+                i,
+                entry.0.to_string(),
+                entry.1.value.to_string()
+            );
+        }
+        i += 1;
+    }
     rdb.dbs.into_iter().next().map(|x| x.1)
 }
 
