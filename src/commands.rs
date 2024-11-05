@@ -8,10 +8,7 @@ pub enum RespMessage {
 }
 
 impl RespMessage {
-    pub async fn write<T>(self, write: &mut T) -> anyhow::Result<()>
-    where
-        T: AsyncWrite + Unpin,
-    {
+    pub async fn write<T: AsyncWrite + Unpin>(self, write: &mut T) -> anyhow::Result<()> {
         match self {
             RespMessage::Array(items) => {
                 write.write_all(b"*").await?;
@@ -127,14 +124,10 @@ pub enum Command {
 }
 
 impl Command {
-    pub async fn from_buffer<T>(read: &mut T) -> anyhow::Result<Command>
-    where
-        T: AsyncBufReadExt + Unpin,
-    {
-        async fn read_param<T>(lines: &mut Lines<T>) -> anyhow::Result<String>
-        where
-            T: AsyncBufReadExt + Unpin,
-        {
+    pub async fn from_buffer<T: AsyncBufReadExt + Unpin>(read: &mut T) -> anyhow::Result<Command> {
+        async fn read_param<T: AsyncBufReadExt + Unpin>(
+            lines: &mut Lines<T>,
+        ) -> anyhow::Result<String> {
             if let Some(bytes_line) = lines.next_line().await? {
                 println!("Received line: {}", bytes_line);
             }
@@ -147,10 +140,10 @@ impl Command {
             }
         }
 
-        async fn read_rest_params<T>(lines: &mut Lines<T>, n: usize) -> anyhow::Result<Vec<String>>
-        where
-            T: AsyncBufReadExt + Unpin,
-        {
+        async fn read_rest_params<T: AsyncBufReadExt + Unpin>(
+            lines: &mut Lines<T>,
+            n: usize,
+        ) -> anyhow::Result<Vec<String>> {
             let mut params = Vec::with_capacity(n);
             for _ in 0..n {
                 params.push(read_param(lines).await?);

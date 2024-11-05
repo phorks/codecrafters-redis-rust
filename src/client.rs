@@ -16,22 +16,14 @@ use crate::{
     store::StoreValue,
 };
 
-pub struct Client<Read, Write>
-where
-    Read: AsyncBufReadExt + Unpin,
-    Write: AsyncWrite + Unpin,
-{
+pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> {
     read: Read,
     write: Write,
     store: Arc<RwLock<HashMap<String, StoreValue>>>,
     config: Arc<ServerConfig>,
 }
 
-impl<Read, Write> Client<Read, Write>
-where
-    Read: AsyncBufReadExt + Unpin,
-    Write: AsyncWrite + Unpin,
-{
+impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Write> {
     pub async fn run(mut self) -> anyhow::Result<()> {
         while let Ok(command) = Command::from_buffer(&mut self.read).await {
             println!("Received command: {:?}", command);
@@ -92,7 +84,7 @@ where
                                     RespMessage::BulkString("dir".into()),
                                     RespMessage::BulkString(dir),
                                 ]))
-                                .await;
+                                .await?;
                             } else if key.eq_ignore_ascii_case("dbfilename") {
                                 let dbfilename = self
                                     .config
