@@ -103,7 +103,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     }
                 }
                 Command::Keys(pattern) => {
-                    if pattern == "\"*\"" {
+                    if pattern == "*" || pattern == "\"*\"" {
                         let Some(db_path) = self.config.db_path() else {
                             anyhow::bail!("Database file is not specified.")
                         };
