@@ -179,7 +179,7 @@ impl DatabaseEntry {
         DatabaseEntry { value, expires_on }
     }
 
-    pub fn expires_on_time(&self) -> Option<SystemTime> {
+    pub fn get_expiry_time(&self) -> Option<SystemTime> {
         let expires_on = self.expires_on.as_ref()?;
 
         let duration = match expires_on {
