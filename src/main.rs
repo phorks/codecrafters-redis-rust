@@ -17,6 +17,7 @@ async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Data
     let db_path = config.db_path().unwrap();
     let mut file = fs::File::open(db_path).await?;
     let rdb = Instance::new(&mut file).await?;
+
     println!("Initial db:");
     let mut i = 0;
     for db in &rdb.dbs {
@@ -30,11 +31,12 @@ async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Data
         }
         i += 1;
     }
+
     rdb.dbs
         .into_iter()
         .next()
         .map(|x| x.1)
-        .ok_or(anyhow::Error::msg("ERROR"))
+        .ok_or(anyhow::Error::msg("No database specified"))
 }
 
 #[tokio::main]
@@ -42,21 +44,15 @@ async fn main() {
     let config = Arc::new(ServerConfig::new(env::args().collect()));
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-    match create_database_from_file(&config).await {
-        Ok(_) => {
-            println!("DB LOADED SUCCESSFULLY");
+    let store = match create_database_from_file(&config).await {
+        Ok(store) => store,
+        Err(err) => {
+            eprintln!("Failed to read from the rdb file: {}", err);
+            Database::new()
         }
-        Err(e) => {
-            eprintln!("{}", e.backtrace());
-        }
-    }
+    };
 
-    // let store = create_database_from_file(&config)
-    //     .await
-    //     .unwrap_or_else(&Database::new);
-    let store = Database::new();
     let store = Arc::new(RwLock::new(store));
-    std::process::exit(1);
 
     loop {
         let (stream, addr) = listener.accept().await.unwrap();

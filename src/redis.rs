@@ -123,6 +123,7 @@ impl EntryValueType {
     }
 
     async fn from_buffer<T: AsyncReadExt + Unpin>(_buf: &mut T) -> anyhow::Result<Self> {
+        _buf.read_u8().await?;
         Ok(Self::Unknown)
     }
 }
