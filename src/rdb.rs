@@ -86,7 +86,7 @@ async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Str
     println!("Read length {:?}", length);
     match length {
         LengthValue::Length(length) => {
-            let mut bytes = Vec::with_capacity(length as usize);
+            let mut bytes = vec![0u8; length as usize];
             buf.read_exact(&mut bytes).await?;
             let str = StringValue::Str(bytes);
             println!("Read string: {}", str.to_string());
@@ -99,7 +99,7 @@ async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Str
             let clen = read_numeric_length(buf).await?;
             let _ulen = read_numeric_length(buf).await?;
 
-            let mut bytes = Vec::with_capacity(clen as usize);
+            let mut bytes = vec![0u8; clen as usize];
             buf.read_exact(&mut bytes).await?;
             // TODO: perform LZF decompression
             Ok(StringValue::Str(bytes))
