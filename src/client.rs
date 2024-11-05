@@ -106,21 +106,34 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                 }
                 Command::Keys(pattern) => {
                     if pattern == "*" || pattern == "\"*\"" {
-                        let Some(db_path) = self.config.db_path() else {
-                            anyhow::bail!("Database file is not specified.")
-                        };
+                        let r_store = self.store.read().await;
 
-                        let mut file = fs::File::open(db_path).await?;
-                        let rdb = Instance::new(&mut file).await?;
-                        let keys = rdb
-                            .dbs
-                            .values()
-                            .flat_map(|x| x.entries.keys())
+                        let keys = r_store
+                            .entries
+                            .keys()
                             .map(|x| RespMessage::BulkString(x.to_string()))
                             .collect();
 
+                        drop(r_store);
+
                         self.write(RespMessage::Array(keys)).await?;
                     }
+                    // if pattern == "*" || pattern == "\"*\"" {
+                    //     let Some(db_path) = self.config.db_path() else {
+                    //         anyhow::bail!("Database file is not specified.")
+                    //     };
+                    //
+                    //     let mut file = fs::File::open(db_path).await?;
+                    //     let rdb = Instance::new(&mut file).await?;
+                    //     let keys = rdb
+                    //         .dbs
+                    //         .values()
+                    //         .flat_map(|x| x.entries.keys())
+                    //         .map(|x| RespMessage::BulkString(x.to_string()))
+                    //         .collect();
+                    //
+                    //     self.write(RespMessage::Array(keys)).await?;
+                    // }
                 }
             };
         }
