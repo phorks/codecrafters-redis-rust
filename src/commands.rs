@@ -121,6 +121,7 @@ pub enum Command {
     Set(String, String, SetCommandOptions),
     Get(String),
     Config(String, Vec<String>),
+    Keys(String),
 }
 
 impl Command {
@@ -208,6 +209,14 @@ impl Command {
             let params = read_rest_params(&mut lines, n_params - 1).await?;
 
             return Ok(Command::Config(action, params));
+        } else if name.eq_ignore_ascii_case("keys") {
+            if n_params == 0 {
+                anyhow::bail!("Missing the PATTERN arg")
+            }
+
+            let pattern = read_param(&mut lines).await?;
+
+            return Ok(Command::Keys(pattern));
         }
 
         anyhow::bail!("Unknown command");

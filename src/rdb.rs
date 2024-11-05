@@ -63,13 +63,23 @@ async fn read_numeric_length<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Re
 }
 
 #[derive(PartialEq, Eq, Hash)]
-enum StringValue {
+pub enum StringValue {
     Str(Vec<u8>),
     Int8(u8),
     Int16(u16),
     Int32(u32),
 }
 
+impl ToString for StringValue {
+    fn to_string(&self) -> String {
+        match self {
+            StringValue::Str(vec) => vec.iter().map(|i| *i as char).collect::<String>(),
+            StringValue::Int8(i) => i.to_string(),
+            StringValue::Int16(i) => i.to_string(),
+            StringValue::Int32(i) => i.to_string(),
+        }
+    }
+}
 async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<StringValue> {
     match read_length(buf).await? {
         LengthValue::Length(length) => {
@@ -82,7 +92,7 @@ async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Str
         LengthValue::IntegerAsString32 => Ok(StringValue::Int32(buf.read_u32_le().await?)),
         LengthValue::CompressedString => {
             let clen = read_numeric_length(buf).await?;
-            let ulen = read_numeric_length(buf).await?;
+            let _ulen = read_numeric_length(buf).await?;
 
             let mut bytes = Vec::with_capacity(clen as usize);
             buf.read_exact(&mut bytes).await?;
@@ -97,11 +107,11 @@ enum EntryValueType {
 }
 
 impl EntryValueType {
-    fn from_u8(flag: u8) -> anyhow::Result<Self> {
+    fn from_u8(_flag: u8) -> anyhow::Result<Self> {
         Ok(Self::Unknown)
     }
 
-    async fn from_buffer<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Self> {
+    async fn from_buffer<T: AsyncReadExt + Unpin>(_buf: &mut T) -> anyhow::Result<Self> {
         Ok(Self::Unknown)
     }
 }
@@ -141,26 +151,25 @@ async fn read_section_id<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result
     }
 }
 
-enum Expiry {
+pub enum Expiry {
     InSeconds(u32),
     InMillis(u64),
 }
 
-struct RdbEntry {
-    key: StringValue,
-    value: StringValue,
-    expires_on: Option<Expiry>,
+pub struct RdbEntry {
+    pub value: StringValue,
+    pub expires_on: Option<Expiry>,
 }
 
-struct RdbDatabase {
-    entries: Vec<RdbEntry>,
+pub struct RdbDatabase {
+    pub entries: HashMap<StringValue, RdbEntry>,
 }
 
 pub struct Rdb {
-    version: [u8; 4],
-    metadata: HashMap<StringValue, StringValue>,
-    dbs: HashMap<usize, RdbDatabase>,
-    checksum: [u8; 8],
+    pub version: [u8; 4],
+    pub metadata: HashMap<StringValue, StringValue>,
+    pub dbs: HashMap<usize, RdbDatabase>,
+    pub checksum: [u8; 8],
 }
 
 impl Rdb {
@@ -186,7 +195,7 @@ impl Rdb {
                     _ = skip_sequence(&mut buf, &[0xFBu8]).await?;
                     let db_table_size = read_numeric_length(&mut buf).await?;
                     let ex_table_size = read_numeric_length(&mut buf).await?;
-                    let mut entries = vec![];
+                    let mut entries = HashMap::new();
 
                     for i in 0..db_table_size {
                         let mut expires_on = None;
@@ -205,11 +214,7 @@ impl Rdb {
                         let key = read_string(&mut buf).await?;
                         let value = read_string(&mut buf).await?;
 
-                        entries.push(RdbEntry {
-                            expires_on,
-                            key,
-                            value,
-                        })
+                        entries.insert(key, RdbEntry { expires_on, value });
                     }
 
                     dbs.insert(index, RdbDatabase { entries });

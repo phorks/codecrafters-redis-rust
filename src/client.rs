@@ -5,13 +5,15 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, BufReader},
+    fs,
+    io::{AsyncBufReadExt, AsyncWrite, BufReader},
     net::TcpStream,
     sync::RwLock,
 };
 
 use crate::{
     commands::{Command, RespMessage},
+    rdb::Rdb,
     server::ServerConfig,
     store::StoreValue,
 };
@@ -95,9 +97,27 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                                     RespMessage::BulkString("dbfilename".into()),
                                     RespMessage::BulkString(dbfilename),
                                 ]))
-                                .await;
+                                .await?;
                             }
                         }
+                    }
+                }
+                Command::Keys(pattern) => {
+                    if pattern == "\"*\"" {
+                        let Some(db_path) = self.config.db_path() else {
+                            anyhow::bail!("Database file is not specified.")
+                        };
+
+                        let mut file = fs::File::open(db_path).await?;
+                        let rdb = Rdb::new(&mut file).await?;
+                        let keys = rdb
+                            .dbs
+                            .values()
+                            .flat_map(|x| x.entries.keys())
+                            .map(|x| RespMessage::BulkString(x.to_string()))
+                            .collect();
+
+                        self.write(RespMessage::Array(keys)).await?;
                     }
                 }
             };

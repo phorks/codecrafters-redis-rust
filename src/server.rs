@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 pub struct ServerConfig {
     pub dir: Option<String>,
     pub dbfilename: Option<String>,
@@ -25,5 +27,9 @@ impl ServerConfig {
         }
 
         ServerConfig { dir, dbfilename }
+    }
+
+    pub fn db_path(&self) -> Option<PathBuf> {
+        Some(Path::new(self.dir.as_ref()?).join(self.dbfilename.as_ref()?))
     }
 }
