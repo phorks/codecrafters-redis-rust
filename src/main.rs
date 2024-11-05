@@ -13,10 +13,10 @@ mod commands;
 mod redis;
 mod server;
 
-async fn create_database_from_file(config: &ServerConfig) -> Option<Database> {
-    let db_path = config.db_path()?;
-    let mut file = fs::File::open(db_path).await.ok()?;
-    let rdb = Instance::new(&mut file).await.ok()?;
+async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Database> {
+    let db_path = config.db_path().unwrap();
+    let mut file = fs::File::open(db_path).await?;
+    let rdb = Instance::new(&mut file).await?;
     println!("Initial db:");
     let mut i = 0;
     for db in &rdb.dbs {
@@ -30,17 +30,33 @@ async fn create_database_from_file(config: &ServerConfig) -> Option<Database> {
         }
         i += 1;
     }
-    rdb.dbs.into_iter().next().map(|x| x.1)
+    rdb.dbs
+        .into_iter()
+        .next()
+        .map(|x| x.1)
+        .ok_or(anyhow::Error::msg("ERROR"))
 }
 
 #[tokio::main]
 async fn main() {
     let config = Arc::new(ServerConfig::new(env::args().collect()));
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-    let store = create_database_from_file(&config)
-        .await
-        .unwrap_or_else(&Database::new);
+
+    match create_database_from_file(&config).await {
+        Ok(_) => {
+            println!("DB LOADED SUCCESSFULLY");
+        }
+        Err(e) => {
+            println!("{e}");
+        }
+    }
+
+    // let store = create_database_from_file(&config)
+    //     .await
+    //     .unwrap_or_else(&Database::new);
+    let store = Database::new();
     let store = Arc::new(RwLock::new(store));
+    std::process::exit(1);
 
     loop {
         let (stream, addr) = listener.accept().await.unwrap();
