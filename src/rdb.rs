@@ -82,15 +82,11 @@ impl ToString for StringValue {
     }
 }
 async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<StringValue> {
-    let length = read_length(buf).await?;
-    println!("Read length {:?}", length);
-    match length {
+    match read_length(buf).await? {
         LengthValue::Length(length) => {
             let mut bytes = vec![0u8; length as usize];
             buf.read_exact(&mut bytes).await?;
-            let str = StringValue::Str(bytes);
-            println!("Read string: {}", str.to_string());
-            Ok(str)
+            Ok(StringValue::Str(bytes))
         }
         LengthValue::IntegerAsString8 => Ok(StringValue::Int8(buf.read_u8().await?)),
         LengthValue::IntegerAsString16 => Ok(StringValue::Int16(buf.read_u16_le().await?)),
