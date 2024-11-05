@@ -13,15 +13,14 @@ use tokio::{
 
 use crate::{
     commands::{Command, RespMessage},
-    rdb::Rdb,
+    redis::{Database, DatabaseEntry, Expiry, Instance, StringValue},
     server::ServerConfig,
-    store::StoreValue,
 };
 
 pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> {
     read: Read,
     write: Write,
-    store: Arc<RwLock<HashMap<String, StoreValue>>>,
+    store: Arc<RwLock<Database>>,
     config: Arc<ServerConfig>,
 }
 
@@ -40,7 +39,8 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     let mut expires_on = None;
                     if let Some(px) = options.px {
                         if let Some(t) = SystemTime::now().checked_add(Duration::from_millis(px)) {
-                            expires_on = Some(t);
+                            let millis = t.duration_since(SystemTime::UNIX_EPOCH)?.as_millis();
+                            expires_on = Some(Expiry::InMillis(millis as u64))
                         } else {
                             anyhow::bail!("Invalid px");
                         }
@@ -48,24 +48,26 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     self.store
                         .write()
                         .await
-                        .insert(key, StoreValue::new(value, expires_on));
+                        .entries
+                        .insert(key.into(), DatabaseEntry::new((&value).into(), expires_on));
 
                     self.write(RespMessage::SimpleString("OK".into())).await?;
                 }
                 Command::Get(key) => {
                     let r_store = self.store.read().await;
-                    if let Some(entry) = r_store.get(&key) {
-                        if let Some(expires_on) = entry.expires_on {
+                    let key = &key.into();
+                    if let Some(entry) = r_store.entries.get(key) {
+                        if let Some(expires_on) = entry.expires_on_time() {
                             if expires_on < SystemTime::now() {
                                 drop(r_store);
                                 let mut w_store = self.store.write().await;
-                                w_store.remove(&key);
+                                w_store.entries.remove(key);
                                 drop(w_store);
                                 self.write(RespMessage::Null).await?;
                                 continue;
                             }
                         }
-                        let value = entry.value.clone();
+                        let value = entry.value.to_string();
                         drop(r_store);
                         self.write(RespMessage::BulkString(value)).await?;
                     } else {
@@ -109,27 +111,11 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                         };
 
                         let mut file = fs::File::open(db_path).await?;
-                        let rdb = Rdb::new(&mut file).await?;
+                        let rdb = Instance::new(&mut file).await?;
                         let keys = rdb
                             .dbs
                             .values()
                             .flat_map(|x| x.entries.keys())
-                            .map(|x| RespMessage::BulkString(x.to_string()))
-                            .collect();
-
-                        self.write(RespMessage::Array(keys)).await?;
-                    } else {
-                        let Some(db_path) = self.config.db_path() else {
-                            anyhow::bail!("Database file is not specified.")
-                        };
-
-                        let mut file = fs::File::open(db_path).await?;
-                        let rdb = Rdb::new(&mut file).await?;
-                        let keys = rdb
-                            .dbs
-                            .values()
-                            .flat_map(|x| x.entries.keys())
-                            .filter(|x| x.to_string() == pattern)
                             .map(|x| RespMessage::BulkString(x.to_string()))
                             .collect();
 
@@ -149,7 +135,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
 
 pub fn new_client(
     stream: TcpStream,
-    store: Arc<RwLock<HashMap<String, StoreValue>>>,
+    store: Arc<RwLock<Database>>,
     config: Arc<ServerConfig>,
 ) -> Client<tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf> {
     let (read, write) = stream.into_split();

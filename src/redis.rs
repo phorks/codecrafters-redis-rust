@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    time::{Duration, SystemTime},
+};
 
 use tokio::io::AsyncReadExt;
 
@@ -71,6 +75,12 @@ pub enum StringValue {
     Int32(u32),
 }
 
+impl<T: AsRef<str>> From<T> for StringValue {
+    fn from(value: T) -> Self {
+        StringValue::Str(value.as_ref().chars().map(|x| x as u8).collect())
+    }
+}
+
 impl ToString for StringValue {
     fn to_string(&self) -> String {
         match self {
@@ -119,7 +129,7 @@ impl EntryValueType {
 
 enum EntryFlag {
     ValueType(EntryValueType),
-    ExpiresInSeconds,
+    ExpiresInSecs,
     ExpiresInMillis,
 }
 
@@ -129,7 +139,7 @@ impl EntryFlag {
 
         Ok(match flag {
             0xFCu8 => Self::ExpiresInMillis,
-            0xFDu8 => Self::ExpiresInSeconds,
+            0xFDu8 => Self::ExpiresInSecs,
             _ => Self::ValueType(EntryValueType::from_u8(flag)?),
         })
     }
@@ -155,27 +165,52 @@ async fn read_section_id<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result
 }
 
 pub enum Expiry {
-    InSeconds(u32),
+    InSecs(u32),
     InMillis(u64),
 }
 
-pub struct RdbEntry {
+pub struct DatabaseEntry {
     pub value: StringValue,
     pub expires_on: Option<Expiry>,
 }
 
-pub struct RdbDatabase {
-    pub entries: HashMap<StringValue, RdbEntry>,
+impl DatabaseEntry {
+    pub fn new(value: StringValue, expires_on: Option<Expiry>) -> Self {
+        DatabaseEntry { value, expires_on }
+    }
+
+    pub fn expires_on_time(&self) -> Option<SystemTime> {
+        let expires_on = self.expires_on.as_ref()?;
+
+        let duration = match expires_on {
+            Expiry::InSecs(secs) => Duration::from_secs(*secs as u64),
+            Expiry::InMillis(millis) => Duration::from_millis(*millis),
+        };
+
+        Some(SystemTime::UNIX_EPOCH + duration)
+    }
 }
 
-pub struct Rdb {
+pub struct Database {
+    pub entries: HashMap<StringValue, DatabaseEntry>,
+}
+
+impl Database {
+    pub fn new() -> Self {
+        Database {
+            entries: HashMap::new(),
+        }
+    }
+}
+
+pub struct Instance {
     pub version: [u8; 4],
     pub metadata: HashMap<StringValue, StringValue>,
-    pub dbs: HashMap<usize, RdbDatabase>,
+    pub dbs: HashMap<usize, Database>,
     pub checksum: [u8; 8],
 }
 
-impl Rdb {
+impl Instance {
     pub async fn new<T: AsyncReadExt + Unpin>(mut buf: T) -> anyhow::Result<Self> {
         skip_sequence(&mut buf, &[0x52u8, 0x45u8, 0x44u8, 0x49u8, 0x53u8]).await?;
         let mut version = [0u8; 4];
@@ -204,8 +239,8 @@ impl Rdb {
                         let mut expires_on = None;
                         let value_type = match EntryFlag::from_buffer(&mut buf).await? {
                             EntryFlag::ValueType(entry_value_type) => entry_value_type,
-                            EntryFlag::ExpiresInSeconds => {
-                                expires_on = Some(Expiry::InSeconds(buf.read_u32_le().await?));
+                            EntryFlag::ExpiresInSecs => {
+                                expires_on = Some(Expiry::InSecs(buf.read_u32_le().await?));
                                 EntryValueType::from_buffer(&mut buf).await?
                             }
                             EntryFlag::ExpiresInMillis => {
@@ -217,15 +252,15 @@ impl Rdb {
                         let key = read_string(&mut buf).await?;
                         let value = read_string(&mut buf).await?;
 
-                        entries.insert(key, RdbEntry { expires_on, value });
+                        entries.insert(key, DatabaseEntry { expires_on, value });
                     }
 
-                    dbs.insert(index, RdbDatabase { entries });
+                    dbs.insert(index, Database { entries });
                 }
                 SectionId::EndOfFile => {
                     let mut checksum = [0u8; 8];
                     buf.read_exact(&mut checksum).await?;
-                    return Ok(Rdb {
+                    return Ok(Instance {
                         version,
                         metadata,
                         dbs,
