@@ -143,6 +143,8 @@ enum SectionId {
 async fn read_section_id<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<SectionId> {
     let id = buf.read_u8().await?;
 
+    println!("Read section id: {:#x}.", id);
+
     match id {
         0xFAu8 => Ok(SectionId::Metadata),
         0xFEu8 => Ok(SectionId::Database),
