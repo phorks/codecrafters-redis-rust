@@ -47,7 +47,7 @@ async fn main() {
             println!("DB LOADED SUCCESSFULLY");
         }
         Err(e) => {
-            println!("Err: {:?}", e);
+            eprintln!("{}", e.backtrace());
         }
     }
 
