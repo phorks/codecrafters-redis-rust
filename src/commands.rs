@@ -24,20 +24,20 @@ impl RespMessage {
                 }
             }
             RespMessage::BulkString(s) => {
-                write.write_all(b"+").await?;
-                write.write_all(s.as_bytes()).await?;
-                write.write_all(b"\r\n").await?;
-            }
-            RespMessage::Null => {
-                write.write_all(b"$-1\r\n").await?;
-            }
-            RespMessage::SimpleString(s) => {
                 let bytes = s.as_bytes();
 
                 write.write_all(b"$").await?;
                 write.write_all(bytes.len().to_string().as_bytes()).await?;
                 write.write_all(b"\r\n").await?;
                 write.write_all(bytes).await?;
+                write.write_all(b"\r\n").await?;
+            }
+            RespMessage::Null => {
+                write.write_all(b"$-1\r\n").await?;
+            }
+            RespMessage::SimpleString(s) => {
+                write.write_all(b"+").await?;
+                write.write_all(s.as_bytes()).await?;
                 write.write_all(b"\r\n").await?;
             }
         }
