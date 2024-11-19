@@ -51,14 +51,16 @@ pub struct InfoSection {
 }
 
 impl InfoSection {
-    pub fn write<W>(&self, write: &mut W)
+    pub fn write<W>(&self, write: &mut W) -> anyhow::Result<()>
     where
         W: Write,
     {
-        write!(write, "# {}\r\n", self.kind.as_header());
+        write!(write, "# {}\r\n", self.kind.as_header())?;
         for (key, value) in &self.data {
-            write!(write, "{}:{}\r\n", key, value);
+            write!(write, "{}:{}\r\n", key, value)?;
         }
+
+        Ok(())
     }
 }
 
@@ -67,7 +69,13 @@ impl InfoSectionKind {
         match self {
             InfoSectionKind::Replication => InfoSection {
                 kind: self.clone(),
-                data: HashMap::from([(String::from("role"), String::from("master"))]),
+                data: HashMap::from([(
+                    String::from("role"),
+                    String::from(match config.replica_of {
+                        Some(_) => "slave",
+                        None => "master",
+                    }),
+                )]),
             },
         }
     }

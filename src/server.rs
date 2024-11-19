@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 const DEFAULT_PORT: u16 = 6379;
 
@@ -6,6 +10,7 @@ pub struct ServerConfig {
     pub dir: Option<String>,
     pub dbfilename: Option<String>,
     port: Option<u16>,
+    pub replica_of: Option<SocketAddrV4>,
 }
 
 impl ServerConfig {
@@ -14,6 +19,7 @@ impl ServerConfig {
         let mut dir = None;
         let mut dbfilename = None;
         let mut port = None;
+        let mut replica_of = None;
         while let Some(arg) = it.next() {
             if arg == "--dir" {
                 if let Some(next) = it.next() {
@@ -33,6 +39,20 @@ impl ServerConfig {
                 } else {
                     panic!("'port' expected");
                 }
+            } else if arg == "--replicaof" {
+                if let Some(addr) = it
+                    .next()
+                    .and_then(|x| x.strip_prefix('"'))
+                    .and_then(|x| x.strip_suffix('"').and_then(|x| x.split_once(' ')))
+                {
+                    let Ok(ip_addr) = Ipv4Addr::from_str(addr.0) else {
+                        panic!("Invalid ipv4 address in --replicaof")
+                    };
+                    let Ok(port_number) = addr.1.parse::<u16>() else {
+                        panic!("Invalid port number in --replicaof")
+                    };
+                    replica_of = Some(SocketAddrV4::new(ip_addr, port_number));
+                }
             }
         }
 
@@ -40,6 +60,7 @@ impl ServerConfig {
             dir,
             dbfilename,
             port,
+            replica_of,
         }
     }
 
