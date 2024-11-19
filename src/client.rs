@@ -6,19 +6,19 @@ use std::{
 
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncWrite, BufReader},
+    io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
     sync::RwLock,
 };
 
 use crate::{
     commands::{Command, InfoCommandParameter},
-    redis::{Database, DatabaseEntry, Expiry, Instance, StringValue},
+    redis::{Database, DatabaseEntry, Expiry, Instance, StringValue, EMPTY_RDB},
     resp::RespMessage,
     server::{ServerConfig, ServerRole},
 };
 
-pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> {
+pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> {
     read: Read,
     write: Write,
     store: Arc<RwLock<Database>>,
@@ -159,6 +159,12 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                             my_info.replid, my_info.repl_offset
                         )))
                         .await?;
+
+                        self.write
+                            .write_all(format!("${}\r\n", EMPTY_RDB.len()).as_bytes())
+                            .await?;
+
+                        self.write.write_all(&EMPTY_RDB).await?;
                     } else {
                         anyhow::bail!("Not implemented")
                     }
