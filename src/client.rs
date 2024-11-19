@@ -15,7 +15,7 @@ use crate::{
     commands::{Command, InfoCommandParameter},
     redis::{Database, DatabaseEntry, Expiry, Instance, StringValue},
     resp::RespMessage,
-    server::ServerConfig,
+    server::{ServerConfig, ServerRole},
 };
 
 pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> {
@@ -148,7 +148,21 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                 Command::ReplConf(_) => {
                     self.write(RespMessage::simple_from_str("OK")).await?;
                 }
-                Command::Psync(_, _) => todo!(),
+                Command::Psync(replid, repl_offset) => {
+                    let ServerRole::Master(my_info) = &self.config.role else {
+                        anyhow::bail!("I am not the master :)")
+                    };
+
+                    if replid == "?" && repl_offset == -1 {
+                        self.write(RespMessage::SimpleString(format!(
+                            "FULLRESYNC {} {}",
+                            my_info.replid, my_info.repl_offset
+                        )))
+                        .await?;
+                    } else {
+                        anyhow::bail!("Not implemented")
+                    }
+                }
             };
         }
 

@@ -4,6 +4,7 @@
         "capas",
         "confs",
         "dbfilename",
+        "FULLRESYNC",
         "Psync",
         "REPLCONF",
         "REPLCONFIG",
