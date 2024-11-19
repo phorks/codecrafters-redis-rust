@@ -42,7 +42,13 @@ impl ServerConfig {
             } else if arg == "--replicaof" {
                 let next = it.next();
                 if let Some(addr) = next.and_then(|x| x.split_once(' ')) {
-                    let Ok(ip_addr) = Ipv4Addr::from_str(addr.0) else {
+                    let Some(ip_addr) = Ipv4Addr::from_str(addr.0).ok().or_else(|| {
+                        if addr.0.eq_ignore_ascii_case("localhost") {
+                            Some(Ipv4Addr::LOCALHOST)
+                        } else {
+                            None
+                        }
+                    }) else {
                         panic!("Invalid ipv4 address in --replicaof")
                     };
                     let Ok(port_number) = addr.1.parse::<u16>() else {
