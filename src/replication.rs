@@ -6,13 +6,13 @@ use crate::{
 };
 
 enum HandshakeMessage {
-    Echo,
+    Ping,
 }
 
 impl ToString for HandshakeMessage {
     fn to_string(&self) -> String {
         match self {
-            HandshakeMessage::Echo => String::from("ECHO"),
+            HandshakeMessage::Ping => String::from("PING"),
         }
     }
 }
@@ -25,7 +25,7 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<()> {
     let mut stream = TcpStream::connect(master_addr).await?;
 
     RespMessage::Array(vec![RespMessage::BulkString(
-        HandshakeMessage::Echo.to_string(),
+        HandshakeMessage::Ping.to_string(),
     )])
     .write(&mut stream)
     .await?;
