@@ -41,10 +41,7 @@ impl ServerConfig {
                 }
             } else if arg == "--replicaof" {
                 let next = it.next();
-                if let Some(addr) = next
-                    .and_then(|x| x.strip_prefix('"'))
-                    .and_then(|x| x.strip_suffix('"').and_then(|x| x.split_once(' ')))
-                {
+                if let Some(addr) = next.and_then(|x| x.split_once(' ')) {
                     let Ok(ip_addr) = Ipv4Addr::from_str(addr.0) else {
                         panic!("Invalid ipv4 address in --replicaof")
                     };
