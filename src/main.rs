@@ -1,10 +1,13 @@
 use std::env;
+use std::net::{Ipv4Addr, SocketAddrV4};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use client::new_client;
 use redis::{Database, Instance};
 use server::ServerConfig;
 use tokio::fs;
+use tokio::net::unix::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
@@ -44,7 +47,9 @@ async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Data
 #[tokio::main]
 async fn main() {
     let config = Arc::new(ServerConfig::new(env::args().collect()));
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), config.port());
+
+    let listener = TcpListener::bind(addr).await.unwrap();
 
     let store = match create_database_from_file(&config).await {
         Ok(store) => store,
