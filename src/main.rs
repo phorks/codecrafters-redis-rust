@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 mod client;
 mod commands;
 mod info;
+mod io_helper;
 mod redis;
 mod replication;
 mod server;

@@ -2,6 +2,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     commands::{Command, RespMessage},
+    io_helper::skip_sequence,
     server::{ServerConfig, ServerRole},
 };
 
@@ -63,15 +64,21 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<()> {
 
     HandshakeMessage::Ping.to_resp().write(&mut stream).await?;
 
+    skip_sequence(&mut stream, "+PONG\r\n".as_bytes()).await?;
+
     HandshakeMessage::ReplConf(ReplConfData::ListeningPort(config.port()))
         .to_resp()
         .write(&mut stream)
         .await?;
 
+    skip_sequence(&mut stream, "+OK\r\n".as_bytes()).await?;
+
     HandshakeMessage::ReplConf(ReplConfData::Capabilities(ReplCapability::Psync2))
         .to_resp()
         .write(&mut stream)
         .await?;
+
+    skip_sequence(&mut stream, "+OK\r\n".as_bytes()).await?;
 
     Ok(())
 }
