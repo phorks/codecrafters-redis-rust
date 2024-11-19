@@ -1,8 +1,10 @@
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     str::FromStr,
 };
+
+use tokio::net::{TcpSocket, TcpStream};
 
 const DEFAULT_PORT: u16 = 6379;
 
@@ -106,5 +108,15 @@ impl ServerConfig {
 
     pub fn port(&self) -> u16 {
         self.port.unwrap_or(DEFAULT_PORT)
+    }
+
+    pub async fn connect_to_slave(&self) -> anyhow::Result<()> {
+        let ServerRole::Slave(master_addr) = self.role else {
+            return Ok(());
+        };
+
+        let stream = TcpStream::connect(master_addr).await?;
+
+        Ok(())
     }
 }

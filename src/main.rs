@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use client::new_client;
 use redis::{Database, Instance};
+use replication::connect_to_master;
 use server::ServerConfig;
 use tokio::fs;
 use tokio::net::unix::SocketAddr;
@@ -15,6 +16,7 @@ mod client;
 mod commands;
 mod info;
 mod redis;
+mod replication;
 mod server;
 
 async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Database> {
@@ -61,6 +63,10 @@ async fn main() {
     };
 
     let store = Arc::new(RwLock::new(store));
+
+    if let Err(err) = connect_to_master(&config).await {
+        eprintln!("Failed to connect to master: {}", err);
+    }
 
     loop {
         let (stream, addr) = listener.accept().await.unwrap();
