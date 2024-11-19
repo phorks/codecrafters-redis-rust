@@ -1,6 +1,10 @@
 {
     "cSpell.words": [
+        "capa",
         "dbfilename",
+        "Psync",
+        "REPLCONF",
+        "REPLCONFIG",
         "replicaof",
         "replid"
     ]

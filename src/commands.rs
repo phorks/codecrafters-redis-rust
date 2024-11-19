@@ -13,6 +13,10 @@ pub enum RespMessage {
 }
 
 impl RespMessage {
+    pub fn bulk_from_str(value: &str) -> Self {
+        RespMessage::BulkString(String::from(value))
+    }
+
     pub async fn write<T: AsyncWrite + Unpin>(self, write: &mut T) -> anyhow::Result<()> {
         match self {
             RespMessage::Array(items) => {
