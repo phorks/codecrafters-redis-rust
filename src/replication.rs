@@ -26,6 +26,7 @@ enum ReplConfData {
 enum HandshakeMessage {
     Ping,
     ReplConf(ReplConfData),
+    Psync(String, i32),
 }
 
 impl HandshakeMessage {
@@ -48,6 +49,13 @@ impl HandshakeMessage {
                     }
                 }
                 lines
+            }
+            HandshakeMessage::Psync(replid, repl_offset) => {
+                vec![
+                    RespMessage::bulk_from_str("PSYNC"),
+                    RespMessage::BulkString(replid.clone()),
+                    RespMessage::BulkString(repl_offset.to_string()),
+                ]
             }
         };
 
@@ -79,6 +87,11 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<()> {
         .await?;
 
     skip_sequence(&mut stream, "+OK\r\n".as_bytes()).await?;
+
+    HandshakeMessage::Psync(String::from("?"), -1)
+        .to_resp()
+        .write(&mut stream)
+        .await?;
 
     Ok(())
 }

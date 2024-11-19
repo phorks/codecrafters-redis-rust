@@ -109,14 +109,4 @@ impl ServerConfig {
     pub fn port(&self) -> u16 {
         self.port.unwrap_or(DEFAULT_PORT)
     }
-
-    pub async fn connect_to_slave(&self) -> anyhow::Result<()> {
-        let ServerRole::Slave(master_addr) = self.role else {
-            return Ok(());
-        };
-
-        let stream = TcpStream::connect(master_addr).await?;
-
-        Ok(())
-    }
 }
