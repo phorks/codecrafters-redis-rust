@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Write};
 
-use crate::server::ServerConfig;
+use crate::server::{ServerConfig, ServerRole};
 
 #[derive(Debug, Clone)]
 pub enum InfoSectionKind {
@@ -67,16 +67,27 @@ impl InfoSection {
 impl InfoSectionKind {
     pub fn get_info(&self, config: &ServerConfig) -> InfoSection {
         match self {
-            InfoSectionKind::Replication => InfoSection {
-                kind: self.clone(),
-                data: HashMap::from([(
-                    String::from("role"),
-                    String::from(match config.replica_of {
-                        Some(_) => "slave",
-                        None => "master",
-                    }),
-                )]),
-            },
+            InfoSectionKind::Replication => {
+                let mut data = HashMap::new();
+                match &config.role {
+                    ServerRole::Master(info) => {
+                        data.insert(String::from("role"), String::from("master"));
+                        data.insert(String::from("master_replid"), info.replid.clone());
+                        data.insert(
+                            String::from("master_repl_offset"),
+                            info.repl_offset.to_string(),
+                        );
+                    }
+                    ServerRole::Slave(_) => {
+                        data.insert(String::from("role"), String::from("slave"));
+                    }
+                }
+
+                InfoSection {
+                    kind: self.clone(),
+                    data,
+                }
+            }
         }
     }
 }

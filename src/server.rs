@@ -6,11 +6,34 @@ use std::{
 
 const DEFAULT_PORT: u16 = 6379;
 
+pub struct MasterServerInfo {
+    pub replid: String,
+    pub repl_offset: u32,
+}
+
+impl MasterServerInfo {
+    pub fn new() -> Self {
+        MasterServerInfo {
+            replid: Self::new_master_replid(),
+            repl_offset: 0,
+        }
+    }
+
+    fn new_master_replid() -> String {
+        String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb")
+    }
+}
+
+pub enum ServerRole {
+    Master(MasterServerInfo),
+    Slave(SocketAddrV4),
+}
+
 pub struct ServerConfig {
     pub dir: Option<String>,
     pub dbfilename: Option<String>,
     port: Option<u16>,
-    pub replica_of: Option<SocketAddrV4>,
+    pub role: ServerRole,
 }
 
 impl ServerConfig {
@@ -70,7 +93,10 @@ impl ServerConfig {
             dir,
             dbfilename,
             port,
-            replica_of,
+            role: replica_of.map_or_else(
+                || ServerRole::Master(MasterServerInfo::new()),
+                |x| ServerRole::Slave(x),
+            ),
         }
     }
 
