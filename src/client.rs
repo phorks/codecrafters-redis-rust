@@ -12,8 +12,9 @@ use tokio::{
 };
 
 use crate::{
-    commands::{Command, InfoCommandParameter, RespMessage},
+    commands::{Command, InfoCommandParameter},
     redis::{Database, DatabaseEntry, Expiry, Instance, StringValue},
+    resp::RespMessage,
     server::ServerConfig,
 };
 
@@ -139,11 +140,15 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     let mut resp = String::new();
                     let sections = param.get_sections(&self.config);
                     for section in sections {
-                        section.write(&mut resp);
+                        section.write(&mut resp)?;
                     }
 
                     self.write(RespMessage::BulkString(resp)).await?;
                 }
+                Command::ReplConf(_) => {
+                    self.write(RespMessage::simple_from_str("OK")).await?;
+                }
+                Command::Psync(_, _) => todo!(),
             };
         }
 
@@ -160,6 +165,7 @@ pub fn new_client(
     store: Arc<RwLock<Database>>,
     config: Arc<ServerConfig>,
 ) -> Client<tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf> {
+    // TODO: move this to Client impl maybe?
     let (read, write) = stream.into_split();
     let read = BufReader::new(read);
     Client {

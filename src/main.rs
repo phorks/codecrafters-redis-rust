@@ -18,6 +18,7 @@ mod info;
 mod io_helper;
 mod redis;
 mod replication;
+mod resp;
 mod server;
 
 async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Database> {

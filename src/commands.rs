@@ -1,54 +1,13 @@
-use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, Lines};
+use core::str;
+use std::str::FromStr;
+
+use tokio::io::{AsyncBufReadExt, Lines};
 
 use crate::{
     info::{InfoSection, InfoSectionKind},
+    resp::RespMessage,
     server::ServerConfig,
 };
-
-pub enum RespMessage {
-    Array(Vec<RespMessage>),
-    BulkString(String),
-    Null,
-    SimpleString(String),
-}
-
-impl RespMessage {
-    pub fn bulk_from_str(value: &str) -> Self {
-        RespMessage::BulkString(String::from(value))
-    }
-
-    pub async fn write<T: AsyncWrite + Unpin>(self, write: &mut T) -> anyhow::Result<()> {
-        match self {
-            RespMessage::Array(items) => {
-                write.write_all(b"*").await?;
-                write.write_all(items.len().to_string().as_bytes()).await?;
-                write.write_all(b"\r\n").await?;
-                for item in items {
-                    Box::pin(item.write(write)).await?;
-                }
-            }
-            RespMessage::BulkString(s) => {
-                let bytes = s.as_bytes();
-
-                write.write_all(b"$").await?;
-                write.write_all(bytes.len().to_string().as_bytes()).await?;
-                write.write_all(b"\r\n").await?;
-                write.write_all(bytes).await?;
-                write.write_all(b"\r\n").await?;
-            }
-            RespMessage::Null => {
-                write.write_all(b"$-1\r\n").await?;
-            }
-            RespMessage::SimpleString(s) => {
-                write.write_all(b"+").await?;
-                write.write_all(s.as_bytes()).await?;
-                write.write_all(b"\r\n").await?;
-            }
-        }
-
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 pub struct SetCommandOptions {
@@ -129,21 +88,74 @@ pub enum InfoCommandParameter {
     All,
 }
 
-impl InfoCommandParameter {
-    pub fn from_str(param: &str) -> anyhow::Result<Self> {
-        match param.to_ascii_lowercase().as_str() {
+impl FromStr for InfoCommandParameter {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
             "replication" => Ok(InfoCommandParameter::Single(InfoSectionKind::Replication)),
             "all" => Ok(InfoCommandParameter::All),
             _ => anyhow::bail!("Unknown INFO section name"),
         }
     }
+}
 
+impl InfoCommandParameter {
     pub fn get_sections(&self, config: &ServerConfig) -> Vec<InfoSection> {
         match self {
             InfoCommandParameter::Single(kind) => vec![kind.get_info(config)],
             InfoCommandParameter::All => InfoSectionKind::iter()
                 .map(|x| x.get_info(config))
                 .collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ReplCapability {
+    Psync2,
+    Eof,
+}
+
+impl ToString for ReplCapability {
+    fn to_string(&self) -> String {
+        match self {
+            ReplCapability::Psync2 => String::from("psync2"),
+            ReplCapability::Eof => String::from("eof"),
+        }
+    }
+}
+
+impl FromStr for ReplCapability {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_ref() {
+            "psync2" => Ok(ReplCapability::Psync2),
+            "eof" => Ok(ReplCapability::Eof),
+            _ => anyhow::bail!("Unknown cap {}", value),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ReplConfData {
+    ListeningPort(u16),
+    Capability(ReplCapability),
+}
+
+impl<T: AsRef<str>> TryFrom<(&T, &T)> for ReplConfData {
+    type Error = anyhow::Error;
+
+    fn try_from(value: (&T, &T)) -> Result<Self, Self::Error> {
+        match value.0.as_ref().to_ascii_lowercase().as_str() {
+            "listening-port" => Ok(ReplConfData::ListeningPort(value.1.as_ref().parse()?)),
+            "capa" => Ok(ReplConfData::Capability(value.1.as_ref().parse()?)),
+            _ => anyhow::bail!(
+                "Invalid replconf data. Key: {}, Value: {}",
+                value.0.as_ref(),
+                value.1.as_ref()
+            ),
         }
     }
 }
@@ -157,10 +169,13 @@ pub enum Command {
     Config(String, Vec<String>),
     Keys(String),
     Info(InfoCommandParameter),
+    ReplConf(Vec<ReplConfData>),
+    Psync(String, i32),
 }
 
 impl Command {
     pub async fn from_buffer<T: AsyncBufReadExt + Unpin>(read: &mut T) -> anyhow::Result<Command> {
+        // TODO: use RespMessage.read since the input is already a RespMessage::Array
         async fn read_param<T: AsyncBufReadExt + Unpin>(
             lines: &mut Lines<T>,
         ) -> anyhow::Result<String> {
@@ -197,72 +212,147 @@ impl Command {
 
         let name = read_param(&mut lines).await?;
 
-        if name.eq_ignore_ascii_case("ping") {
-            if n_params != 0 {
-                anyhow::bail!("Incorrect number of parameters for ping command");
+        match name.to_ascii_lowercase().as_ref() {
+            "ping" => {
+                if n_params != 0 {
+                    anyhow::bail!("Incorrect number of parameters for ping command");
+                }
+
+                return Ok(Command::Ping);
             }
+            "echo" => {
+                if n_params != 1 {
+                    anyhow::bail!(
+                        "Incorrect number of parameters, expected: 2, received {}",
+                        n_params
+                    );
+                }
 
-            return Ok(Command::Ping);
-        } else if name.eq_ignore_ascii_case("echo") {
-            if n_params != 1 {
-                anyhow::bail!(
-                    "Incorrect number of parameters, expected: 2, received {}",
-                    n_params
-                );
+                return Ok(Command::Echo(read_param(&mut lines).await?));
             }
+            "set" => {
+                if n_params < 2 {
+                    anyhow::bail!(
+                        "Incorrect number of parameters, expected: at least 2, received {}",
+                        n_params
+                    );
+                }
 
-            return Ok(Command::Echo(read_param(&mut lines).await?));
-        } else if name.eq_ignore_ascii_case("set") {
-            if n_params < 2 {
-                anyhow::bail!(
-                    "Incorrect number of parameters, expected: at least 2, received {}",
-                    n_params
-                );
+                let key = read_param(&mut lines).await?;
+                let value = read_param(&mut lines).await?;
+
+                let rest_params = read_rest_params(&mut lines, n_params - 2).await?;
+                let options = SetCommandOptions::from_rest_params(rest_params)?;
+
+                return Ok(Command::Set(key, value, options));
             }
+            "get" => {
+                if n_params == 0 {
+                    anyhow::bail!(
+                        "Incorrect number of parameters, expected: at least 1, received 0"
+                    );
+                }
 
-            let key = read_param(&mut lines).await?;
-            let value = read_param(&mut lines).await?;
+                let key = read_param(&mut lines).await?;
 
-            let rest_params = read_rest_params(&mut lines, n_params - 2).await?;
-            let options = SetCommandOptions::from_rest_params(rest_params)?;
-
-            return Ok(Command::Set(key, value, options));
-        } else if name.eq_ignore_ascii_case("get") {
-            if n_params == 0 {
-                anyhow::bail!("Incorrect number of parameters, expected: at least 1, received 0");
+                return Ok(Command::Get(key));
             }
+            "config" => {
+                if n_params == 0 {
+                    anyhow::bail!("Missing CONFIG command action parameter");
+                }
 
-            let key = read_param(&mut lines).await?;
+                let action = read_param(&mut lines).await?;
+                let params = read_rest_params(&mut lines, n_params - 1).await?;
 
-            return Ok(Command::Get(key));
-        } else if name.eq_ignore_ascii_case("config") {
-            if n_params == 0 {
-                anyhow::bail!("Missing CONFIG command action parameter");
+                return Ok(Command::Config(action, params));
             }
+            "keys" => {
+                if n_params == 0 {
+                    anyhow::bail!("Missing the PATTERN arg")
+                }
 
-            let action = read_param(&mut lines).await?;
-            let params = read_rest_params(&mut lines, n_params - 1).await?;
+                let pattern = read_param(&mut lines).await?;
 
-            return Ok(Command::Config(action, params));
-        } else if name.eq_ignore_ascii_case("keys") {
-            if n_params == 0 {
-                anyhow::bail!("Missing the PATTERN arg")
+                return Ok(Command::Keys(pattern));
             }
+            "info" => {
+                let section_name = if n_params > 0 {
+                    let next = read_param(&mut lines).await?;
+                    InfoCommandParameter::from_str(&next)?
+                } else {
+                    InfoCommandParameter::All
+                };
 
-            let pattern = read_param(&mut lines).await?;
+                return Ok(Command::Info(section_name));
+            }
+            "replconf" => {
+                if n_params == 0 {
+                    anyhow::bail!("Missing replconf parameters");
+                }
 
-            return Ok(Command::Keys(pattern));
-        } else if name.eq_ignore_ascii_case("info") {
-            let section_name = if n_params > 0 {
-                let next = read_param(&mut lines).await?;
-                InfoCommandParameter::from_str(&next)?
-            } else {
-                InfoCommandParameter::All
-            };
+                if n_params % 2 == 1 {
+                    anyhow::bail!("Invalid number of replconf parameters.");
+                }
 
-            return Ok(Command::Info(section_name));
+                let rest = read_rest_params(&mut lines, n_params).await?;
+
+                let mut capas: Vec<ReplConfData> = vec![];
+                for kv in rest.chunks(2) {
+                    capas.push((&kv[0], &kv[1]).try_into()?);
+                }
+
+                Ok(Command::ReplConf(capas))
+            }
+            "psync" => {
+                if n_params != 2 {
+                    anyhow::bail!(
+                        "Insufficient number of parameters for psync (required 2, received {})",
+                        n_params
+                    )
+                }
+
+                let replid = read_param(&mut lines).await?;
+                let repl_offset = read_param(&mut lines).await?.parse()?;
+
+                Ok(Command::Psync(replid, repl_offset))
+            }
+            _ => anyhow::bail!("Unknown command"),
         }
+    }
 
-        anyhow::bail!("Unknown command");
+    pub fn to_resp(&self) -> anyhow::Result<RespMessage> {
+        let lines = match self {
+            Command::Ping => {
+                vec![RespMessage::bulk_from_str("PING")]
+            }
+            Command::ReplConf(confs) => {
+                let mut lines = Vec::with_capacity(3);
+                lines.push(RespMessage::bulk_from_str("REPLCONF"));
+                for data in confs {
+                    match data {
+                        ReplConfData::ListeningPort(port) => {
+                            lines.push(RespMessage::bulk_from_str("listening-port"));
+                            lines.push(RespMessage::BulkString(port.to_string()));
+                        }
+                        ReplConfData::Capability(capa) => {
+                            lines.push(RespMessage::bulk_from_str("capa"));
+                            lines.push(RespMessage::BulkString(capa.to_string()));
+                        }
+                    }
+                }
+                lines
+            }
+            Command::Psync(replid, repl_offset) => {
+                vec![
+                    RespMessage::bulk_from_str("PSYNC"),
+                    RespMessage::BulkString(replid.clone()),
+                    RespMessage::BulkString(repl_offset.to_string()),
+                ]
+            }
+            _ => anyhow::bail!("Send command is not supported"),
+        };
+
+        Ok(RespMessage::Array(lines))
     }
 }
