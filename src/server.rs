@@ -40,8 +40,8 @@ impl ServerConfig {
                     panic!("'port' expected");
                 }
             } else if arg == "--replicaof" {
-                if let Some(addr) = it
-                    .next()
+                let next = it.next();
+                if let Some(addr) = next
                     .and_then(|x| x.strip_prefix('"'))
                     .and_then(|x| x.strip_suffix('"').and_then(|x| x.split_once(' ')))
                 {
@@ -52,6 +52,13 @@ impl ServerConfig {
                         panic!("Invalid port number in --replicaof")
                     };
                     replica_of = Some(SocketAddrV4::new(ip_addr, port_number));
+                }
+
+                if replica_of.is_none() {
+                    panic!(
+                        "Invalid --replicaof value {}",
+                        next.unwrap_or(&String::from("<empty>"))
+                    );
                 }
             }
         }
