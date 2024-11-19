@@ -12,7 +12,7 @@ use tokio::{
 };
 
 use crate::{
-    commands::{Command, RespMessage},
+    commands::{Command, InfoCommandParameter, RespMessage},
     redis::{Database, DatabaseEntry, Expiry, Instance, StringValue},
     server::ServerConfig,
 };
@@ -134,6 +134,15 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     //
                     //     self.write(RespMessage::Array(keys)).await?;
                     // }
+                }
+                Command::Info(param) => {
+                    let mut resp = String::new();
+                    let sections = param.get_sections(&self.config);
+                    for section in sections {
+                        section.write(&mut resp);
+                    }
+
+                    self.write(RespMessage::BulkString(resp)).await?;
                 }
             };
         }

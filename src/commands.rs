@@ -1,4 +1,9 @@
-use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, Lines};
+
+use crate::{
+    info::{InfoSection, InfoSectionKind},
+    server::ServerConfig,
+};
 
 pub enum RespMessage {
     Array(Vec<RespMessage>),
@@ -115,6 +120,31 @@ impl SetCommandOptions {
 }
 
 #[derive(Debug)]
+pub enum InfoCommandParameter {
+    Single(InfoSectionKind),
+    All,
+}
+
+impl InfoCommandParameter {
+    pub fn from_str(param: &str) -> anyhow::Result<Self> {
+        match param.to_ascii_lowercase().as_str() {
+            "replication" => Ok(InfoCommandParameter::Single(InfoSectionKind::Replication)),
+            "all" => Ok(InfoCommandParameter::All),
+            _ => anyhow::bail!("Unknown INFO section name"),
+        }
+    }
+
+    pub fn get_sections(&self, config: &ServerConfig) -> Vec<InfoSection> {
+        match self {
+            InfoCommandParameter::Single(kind) => vec![kind.get_info(config)],
+            InfoCommandParameter::All => InfoSectionKind::iter()
+                .map(|x| x.get_info(config))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Command {
     Ping,
     Echo(String),
@@ -122,6 +152,7 @@ pub enum Command {
     Get(String),
     Config(String, Vec<String>),
     Keys(String),
+    Info(InfoCommandParameter),
 }
 
 impl Command {
@@ -217,6 +248,15 @@ impl Command {
             let pattern = read_param(&mut lines).await?;
 
             return Ok(Command::Keys(pattern));
+        } else if name.eq_ignore_ascii_case("info") {
+            let section_name = if n_params > 0 {
+                let next = read_param(&mut lines).await?;
+                InfoCommandParameter::from_str(&next)?
+            } else {
+                InfoCommandParameter::All
+            };
+
+            return Ok(Command::Info(section_name));
         }
 
         anyhow::bail!("Unknown command");

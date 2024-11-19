@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 
 mod client;
 mod commands;
+mod info;
 mod redis;
 mod server;
 
