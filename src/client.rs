@@ -246,9 +246,10 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
             };
 
             if let Some(channel) = response {
-                channel
-                    .send(Command::from_buffer(&mut self.read).await?)
-                    .unwrap();
+                let command = Command::from_buffer(&mut self.read).await?;
+                println!("Slave proxy received command {:?} from the slave", &command);
+
+                channel.send(command).unwrap();
             }
         }
 
