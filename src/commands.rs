@@ -224,11 +224,11 @@ impl Command {
             lines: &mut Lines<T>,
         ) -> anyhow::Result<String> {
             if let Some(bytes_line) = lines.next_line().await? {
-                println!("Received line: {}", bytes_line);
+                // println!("Received line: {}", bytes_line);
             }
 
             if let Some(value_line) = lines.next_line().await? {
-                println!("Received line: {}", value_line);
+                // println!("Received line: {}", value_line);
                 Ok(value_line)
             } else {
                 Ok(String::new())
