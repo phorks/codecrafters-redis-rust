@@ -210,6 +210,7 @@ pub enum Command {
     Info(InfoCommandParameter),
     ReplConf(Vec<ReplConfData>),
     Psync(String, i32),
+    Wait(u32, u32),
 }
 
 impl Command {
@@ -346,7 +347,7 @@ impl Command {
             "psync" => {
                 if n_params != 2 {
                     anyhow::bail!(
-                        "Insufficient number of parameters for psync (required 2, received {})",
+                        "Incorrect number of parameters for psync (required 2, received {})",
                         n_params
                     )
                 }
@@ -355,6 +356,19 @@ impl Command {
                 let repl_offset = read_param(&mut lines).await?.parse()?;
 
                 Ok(Command::Psync(replid, repl_offset))
+            }
+            "wait" => {
+                if n_params != 2 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for WAIT (required 2, received {})",
+                        n_params
+                    )
+                }
+
+                let num_replicas = read_param(&mut lines).await?.parse()?;
+                let timeout = read_param(&mut lines).await?.parse()?;
+
+                Ok(Command::Wait(num_replicas, timeout))
             }
             _ => anyhow::bail!("Unknown command"),
         }

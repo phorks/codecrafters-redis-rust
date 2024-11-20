@@ -193,6 +193,9 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     slave_state = Some((0, SlaveHandshakeState::Ready(port, repl_confs)));
                     break;
                 }
+                Command::Wait(num_replicas, timeout) => {
+                    self.write(RespMessage::Integer(0)).await?;
+                }
             };
             n_commands += 1;
         }

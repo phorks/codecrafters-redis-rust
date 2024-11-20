@@ -52,8 +52,7 @@ impl<Write: AsyncWriteExt + Unpin> ReplicationChannel<Write> {
                     // master is alive :)
                 }
                 Command::Set(key, value, options) => {
-                    let resp = self.store.set(key, value, options).await?;
-                    // resp.write(&mut self.write).await?;
+                    _ = self.store.set(key, value, options).await?;
                 }
                 Command::ReplConf(confs) => {
                     for conf in confs {

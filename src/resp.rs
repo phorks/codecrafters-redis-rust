@@ -9,6 +9,7 @@ pub enum RespMessage {
     BulkString(String),
     Null,
     SimpleString(String),
+    Integer(i64),
 }
 
 impl RespMessage {
@@ -45,6 +46,11 @@ impl RespMessage {
             RespMessage::SimpleString(s) => {
                 write.write_all(b"+").await?;
                 write.write_all(s.as_bytes()).await?;
+                write.write_all(b"\r\n").await?;
+            }
+            RespMessage::Integer(i) => {
+                write.write_all(b":").await?;
+                write.write_all(i.to_string().as_bytes()).await?;
                 write.write_all(b"\r\n").await?;
             }
         }
