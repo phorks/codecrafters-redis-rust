@@ -74,7 +74,6 @@ impl RespMessage {
             }
         }
 
-        write.flush();
         Ok(())
     }
 
