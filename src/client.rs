@@ -228,22 +228,13 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
         while let Some((command, response)) = rx.recv().await {
             match command {
                 Command::Set(key, value, options) => {
-                    let mut lines = vec![
-                        RespMessage::bulk_from_str("SET"),
-                        RespMessage::BulkString(key.clone()),
-                        RespMessage::BulkString(value.clone()),
-                    ];
-
-                    options.append_to_vec(&mut lines);
-
-                    self.write(RespMessage::Array(lines)).await?;
+                    self.write(Command::Set(key, value, options).to_resp()?)
+                        .await?;
                 }
                 Command::ReplConf(confs) => {
                     if let [ReplConfData::GetAck] = confs[..] {
-                        self.write(RespMessage::Array(vec![RespMessage::bulk_from_str(
-                            "GETACK",
-                        )]))
-                        .await?;
+                        self.write(Command::ReplConf(vec![ReplConfData::GetAck]).to_resp()?)
+                            .await?;
                     } else {
                         anyhow::bail!(
                             "Unexpected REPLCONF command forwarded to slave client {:?}",
