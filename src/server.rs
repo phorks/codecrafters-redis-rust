@@ -133,7 +133,8 @@ impl MasterServerInfo {
                             let [ReplConfData::Ack(_ack)] = confs[..] else { return };
                             *n.lock().await += 1;
                         }
-                        _ = cancel_rx.recv() => {
+                        res = cancel_rx.recv() => {
+                            res.unwrap();
                             println!("Wait request canceled for slave due to timeout");
                             return;
                         }
