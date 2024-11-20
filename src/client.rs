@@ -226,10 +226,12 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
         let mut rx = master.register_slave(self.addr.clone(), capas).await;
 
         while let Some((command, response)) = rx.recv().await {
-            match command {
+            match &command {
                 Command::Set(key, value, options) => {
-                    self.write(Command::Set(key, value, options).to_resp()?)
-                        .await?;
+                    self.write(
+                        Command::Set(key.clone(), value.clone(), options.clone()).to_resp()?,
+                    )
+                    .await?;
                 }
                 Command::ReplConf(confs) => {
                     if let [ReplConfData::GetAck] = confs[..] {
@@ -246,10 +248,15 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
             };
 
             if let Some(channel) = response {
-                let command = Command::from_buffer(&mut self.read).await?;
-                println!("Slave proxy received command {:?} from the slave", &command);
+                let response = Command::from_buffer(&mut self.read).await?;
+                println!(
+                    "Slave proxy received command {:?} from the slave",
+                    &response
+                );
 
-                channel.send(command).unwrap();
+                if let Err(err) = channel.send(response) {
+                    eprintln!("Slave proxy failed to send response to the replication channel. Request: {:?}, Err: {:?}", command, err);
+                }
             }
         }
 
