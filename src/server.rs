@@ -112,6 +112,7 @@ impl MasterServerInfo {
         for slave in slaves.iter() {
             let tx = Arc::clone(&slave.client_tx);
             let n = Arc::clone(&n);
+            let addr = slave.addr.clone();
             tokio::spawn(async move {
                 let (response_tx, response_rx) = oneshot::channel();
                 let sent = tx.lock().await.send((
@@ -131,7 +132,7 @@ impl MasterServerInfo {
                         *n.lock().await += 1;
                     }
                     _ = cancel_rx.recv() => {
-                        println!("Wait request canceled for slave due to timeout (slave: {:?})", slave.addr);
+                        println!("Wait request canceled for slave due to timeout (slave: {:?})", addr);
                         return;
                     }
                 }
