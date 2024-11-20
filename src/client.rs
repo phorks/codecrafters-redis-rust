@@ -238,6 +238,19 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
 
                     self.write(RespMessage::Array(lines)).await?;
                 }
+                Command::ReplConf(confs) => {
+                    if let [ReplConfData::GetAck] = confs[..] {
+                        self.write(RespMessage::Array(vec![RespMessage::bulk_from_str(
+                            "GETACK",
+                        )]))
+                        .await?;
+                    } else {
+                        anyhow::bail!(
+                            "Unexpected REPLCONF command forwarded to slave client {:?}",
+                            confs
+                        );
+                    }
+                }
                 _ => anyhow::bail!("Unexpected command forwarded to slave client {:?}", command),
             };
 
