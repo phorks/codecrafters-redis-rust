@@ -7,7 +7,10 @@ use std::{
 
 use tokio::{
     io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
-    net::TcpStream,
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
     sync::{mpsc, RwLock},
 };
 
@@ -279,20 +282,37 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
     }
 }
 
-pub fn new_client(
-    stream: TcpStream,
-    addr: SocketAddr,
-    store: Arc<RwLock<Database>>,
-    config: Arc<ServerConfig>,
-) -> Client<tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf> {
-    // TODO: move this to Client impl maybe?
-    let (read, write) = stream.into_split();
-    let read = BufReader::new(read);
-    Client {
-        read,
-        write,
-        addr,
-        store,
-        config,
+impl Client<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
+    pub fn new(
+        read: BufReader<OwnedReadHalf>,
+        write: OwnedWriteHalf,
+        addr: SocketAddr,
+        store: Arc<RwLock<Database>>,
+        config: Arc<ServerConfig>,
+    ) -> Self {
+        Client {
+            read,
+            write,
+            addr,
+            store,
+            config,
+        }
+    }
+
+    pub fn from_stream(
+        stream: TcpStream,
+        addr: SocketAddr,
+        store: Arc<RwLock<Database>>,
+        config: Arc<ServerConfig>,
+    ) -> Self {
+        let (read, write) = stream.into_split();
+        let read = BufReader::new(read);
+        Client {
+            read,
+            write,
+            addr,
+            store,
+            config,
+        }
     }
 }

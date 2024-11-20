@@ -2,9 +2,9 @@ use std::env;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 
-use client::new_client;
+use client::Client;
 use redis::{Database, Instance};
-use replication::connect_to_master;
+use replication::{connect_to_master, MasterConnection};
 use server::ServerConfig;
 use tokio::fs;
 use tokio::net::TcpListener;
@@ -64,8 +64,29 @@ async fn main() {
 
     let store = Arc::new(RwLock::new(store));
 
-    if let Err(err) = connect_to_master(&config).await {
-        eprintln!("Failed to connect to master: {}", err);
+    match connect_to_master(&config).await {
+        Ok(Some(conn)) => {
+            let store = store.clone();
+            let config = config.clone();
+            println!("Accepted connection from {addr}");
+            tokio::spawn(async move {
+                let client = Client::new(
+                    conn.read,
+                    conn.write,
+                    std::net::SocketAddr::V4(conn.addr),
+                    store,
+                    config,
+                );
+                match client.run().await {
+                    Ok(_) => println!("Successfully disconnected from {addr}"),
+                    Err(err) => println!("Disconnected because of a failure: {:?}", err),
+                }
+            });
+        }
+        Err(err) => {
+            eprintln!("Failed to connect to master: {}", err);
+        }
+        _ => {}
     }
 
     loop {
@@ -74,7 +95,7 @@ async fn main() {
         let config = config.clone();
         println!("Accepted connection from {addr}");
         tokio::spawn(async move {
-            let client = new_client(stream, addr, store, config);
+            let client = Client::from_stream(stream, addr, store, config);
             match client.run().await {
                 Ok(_) => println!("Successfully disconnected from {addr}"),
                 Err(err) => println!("Disconnected because of a failure: {:?}", err),

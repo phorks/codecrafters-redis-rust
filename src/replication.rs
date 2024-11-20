@@ -1,8 +1,12 @@
 use core::str;
+use std::{io::BufRead, net::SocketAddrV4};
 
 use tokio::{
     io::{AsyncReadExt, BufReader},
-    net::TcpStream,
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
 };
 
 use crate::{
@@ -12,7 +16,14 @@ use crate::{
     server::{ServerConfig, ServerRole},
 };
 
-pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<Vec<u8>>> {
+pub struct MasterConnection {
+    pub read: BufReader<OwnedReadHalf>,
+    pub write: OwnedWriteHalf,
+    pub addr: SocketAddrV4,
+    pub rdb: Vec<u8>,
+}
+
+pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<MasterConnection>> {
     let ServerRole::Slave(master_addr) = config.role else {
         return Ok(None);
     };
@@ -59,5 +70,10 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<V
     let mut buf = vec![0u8; length];
     read.read_exact(&mut buf).await?;
 
-    Ok(Some(buf))
+    Ok(Some(MasterConnection {
+        read,
+        write,
+        addr: master_addr,
+        rdb: buf,
+    }))
 }
