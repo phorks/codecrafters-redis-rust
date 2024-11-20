@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use client::Client;
 use redis::{Database, Instance};
-use replication::{connect_to_master, MasterConnection};
+use replication::{connect_to_master, MasterConnection, ReplicationChannel};
 use server::ServerConfig;
 use tokio::fs;
 use tokio::net::TcpListener;
@@ -26,8 +26,8 @@ async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Data
     let mut file = fs::File::open(db_path).await?;
     let rdb = Instance::new(&mut file).await?;
 
-    println!("Initial db:");
-    let mut i = 0;
+    // println!("Initial db:");
+    // let mut i = 0;
     // for db in &rdb.dbs {
     //     for entry in &db.1.entries {
     //         println!(
@@ -70,14 +70,14 @@ async fn main() {
             let config = config.clone();
             println!("Accepted connection from {addr}");
             tokio::spawn(async move {
-                let client = Client::new(
+                let client = ReplicationChannel::new(
                     conn.read,
                     conn.write,
                     std::net::SocketAddr::V4(conn.addr),
                     store,
                     config,
-                    true,
                 );
+
                 match client.run().await {
                     Ok(_) => println!("Successfully disconnected from {addr}"),
                     Err(err) => println!("Disconnected because of a failure: {:?}", err),
@@ -96,7 +96,7 @@ async fn main() {
         let config = config.clone();
         println!("Accepted connection from {addr}");
         tokio::spawn(async move {
-            let client = Client::from_stream(stream, addr, store, config, false);
+            let client = Client::from_stream(stream, addr, store, config);
             match client.run().await {
                 Ok(_) => println!("Successfully disconnected from {addr}"),
                 Err(err) => println!("Disconnected because of a failure: {:?}", err),

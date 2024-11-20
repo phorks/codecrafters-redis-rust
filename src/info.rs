@@ -51,10 +51,7 @@ pub struct InfoSection {
 }
 
 impl InfoSection {
-    pub fn write<W>(&self, write: &mut W) -> anyhow::Result<()>
-    where
-        W: Write,
-    {
+    pub fn write<W: Write>(&self, write: &mut W) -> anyhow::Result<()> {
         write!(write, "# {}\r\n", self.kind.as_header())?;
         for (key, value) in &self.data {
             write!(write, "{}:{}\r\n", key, value)?;

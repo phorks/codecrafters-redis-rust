@@ -35,7 +35,6 @@ pub struct ReplicationChannel<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteEx
     addr: SocketAddr,
     store: Arc<Database>,
     config: Arc<ServerConfig>,
-    is_replication_channel: bool,
 }
 
 impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> ReplicationChannel<Read, Write> {
@@ -64,6 +63,24 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> ReplicationCha
         }
 
         Ok(())
+    }
+}
+
+impl ReplicationChannel<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
+    pub fn new(
+        read: BufReader<OwnedReadHalf>,
+        write: OwnedWriteHalf,
+        addr: SocketAddr,
+        store: Arc<Database>,
+        config: Arc<ServerConfig>,
+    ) -> Self {
+        Self {
+            read,
+            write,
+            addr,
+            store,
+            config,
+        }
     }
 }
 

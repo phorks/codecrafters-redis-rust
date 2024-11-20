@@ -34,7 +34,6 @@ pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> {
     addr: SocketAddr,
     store: Arc<Database>,
     config: Arc<ServerConfig>,
-    is_replication_channel: bool,
 }
 
 impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Write> {
@@ -47,9 +46,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
             match command {
                 Command::Ping => {
                     self.write(RespMessage::SimpleString("PONG".into())).await?;
-                    if !self.is_replication_channel {
-                        slave_state = Some((n_commands, SlaveHandshakeState::PingReceived));
-                    }
+                    slave_state = Some((n_commands, SlaveHandshakeState::PingReceived));
                 }
                 Command::Echo(message) => {
                     self.write(RespMessage::BulkString(message.clone())).await?;
@@ -129,78 +126,72 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     self.write(RespMessage::BulkString(resp)).await?;
                 }
                 Command::ReplConf(data) => {
-                    if !self.is_replication_channel {
-                        let Some((n, prev_state)) = &slave_state else {
-                            anyhow::bail!("Unexpected replconf command")
-                        };
+                    let Some((n, prev_state)) = &slave_state else {
+                        anyhow::bail!("Unexpected replconf command")
+                    };
 
-                        if *n != n_commands - 1 {
-                            anyhow::bail!("Illegal handshake pattern");
-                        }
-
-                        slave_state = match (prev_state, &data[..]) {
-                            (
-                                SlaveHandshakeState::PingReceived,
-                                [ReplConfData::ListeningPort(port)],
-                            ) => {
-                                Some((n_commands, SlaveHandshakeState::PortReceived(port.clone())))
-                            }
-                            (SlaveHandshakeState::PortReceived(port), _) => {
-                                if data.iter().any(|x| match x {
-                                    ReplConfData::ListeningPort(_) => true,
-                                    _ => false,
-                                }) {
-                                    anyhow::bail!(
-                                        "Listening port is already set. Illegal handshake pattern"
-                                    );
-                                }
-
-                                Some((
-                                    (n_commands),
-                                    SlaveHandshakeState::CapaReceived(port.clone(), data),
-                                ))
-                            }
-                            _ => anyhow::bail!("Illegal handshake pattern"),
-                        };
-
-                        self.write(RespMessage::simple_from_str("OK")).await?;
+                    if *n != n_commands - 1 {
+                        anyhow::bail!("Illegal handshake pattern");
                     }
+
+                    slave_state = match (prev_state, &data[..]) {
+                        (
+                            SlaveHandshakeState::PingReceived,
+                            [ReplConfData::ListeningPort(port)],
+                        ) => Some((n_commands, SlaveHandshakeState::PortReceived(port.clone()))),
+                        (SlaveHandshakeState::PortReceived(port), _) => {
+                            if data.iter().any(|x| match x {
+                                ReplConfData::ListeningPort(_) => true,
+                                _ => false,
+                            }) {
+                                anyhow::bail!(
+                                    "Listening port is already set. Illegal handshake pattern"
+                                );
+                            }
+
+                            Some((
+                                (n_commands),
+                                SlaveHandshakeState::CapaReceived(port.clone(), data),
+                            ))
+                        }
+                        _ => anyhow::bail!("Illegal handshake pattern"),
+                    };
+
+                    self.write(RespMessage::simple_from_str("OK")).await?;
                 }
                 Command::Psync(replid, repl_offset) => {
-                    if !self.is_replication_channel {
-                        let ServerRole::Master(my_info) = &self.config.role else {
-                            anyhow::bail!("I am not the master :)")
-                        };
+                    let ServerRole::Master(my_info) = &self.config.role else {
+                        anyhow::bail!("I am not the master :)")
+                    };
 
-                        let Some((n, SlaveHandshakeState::CapaReceived(port, repl_confs))) =
-                            slave_state
-                        else {
-                            anyhow::bail!("Unexpected replconf command")
-                        };
+                    let Some((n, SlaveHandshakeState::CapaReceived(port, repl_confs))) =
+                        slave_state
+                    else {
+                        anyhow::bail!("Unexpected replconf command")
+                    };
 
-                        if n != n_commands - 1 {
-                            anyhow::bail!("Illegal handshake pattern");
-                        }
+                    if n != n_commands - 1 {
+                        anyhow::bail!("Illegal handshake pattern");
+                    }
 
-                        if replid == "?" && repl_offset == -1 {
-                            self.write(RespMessage::SimpleString(format!(
-                                "FULLRESYNC {} {}",
-                                my_info.replid, my_info.repl_offset
-                            )))
+                    if replid == "?" && repl_offset == -1 {
+                        self.write(RespMessage::SimpleString(format!(
+                            "FULLRESYNC {} {}",
+                            my_info.replid, my_info.repl_offset
+                        )))
+                        .await?;
+
+                        self.write
+                            .write_all(format!("${}\r\n", EMPTY_RDB.len()).as_bytes())
                             .await?;
 
-                            self.write
-                                .write_all(format!("${}\r\n", EMPTY_RDB.len()).as_bytes())
-                                .await?;
-
-                            self.write.write_all(&EMPTY_RDB).await?;
-                        } else {
-                            anyhow::bail!("Not implemented")
-                        }
-
-                        slave_state = Some((0, SlaveHandshakeState::Ready(port, repl_confs)));
-                        break;
+                        self.write.write_all(&EMPTY_RDB).await?;
+                    } else {
+                        anyhow::bail!("Not implemented")
                     }
+
+                    slave_state = Some((0, SlaveHandshakeState::Ready(port, repl_confs)));
+                    break;
                 }
             };
             n_commands += 1;
@@ -268,7 +259,6 @@ impl Client<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
         addr: SocketAddr,
         store: Arc<Database>,
         config: Arc<ServerConfig>,
-        is_replication_channel: bool,
     ) -> Self {
         Client {
             read,
@@ -276,7 +266,6 @@ impl Client<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
             addr,
             store,
             config,
-            is_replication_channel,
         }
     }
 
@@ -285,7 +274,6 @@ impl Client<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
         addr: SocketAddr,
         store: Arc<Database>,
         config: Arc<ServerConfig>,
-        is_replication_channel: bool,
     ) -> Self {
         let (read, write) = stream.into_split();
         let read = BufReader::new(read);
@@ -295,7 +283,6 @@ impl Client<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
             addr,
             store,
             config,
-            is_replication_channel,
         }
     }
 }
