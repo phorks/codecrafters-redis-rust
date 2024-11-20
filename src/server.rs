@@ -1,5 +1,4 @@
 use std::{
-    borrow::BorrowMut,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     str::FromStr,
@@ -10,7 +9,6 @@ use std::{
 use tokio::{
     select,
     sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
-    time::timeout,
 };
 
 use crate::commands::{Command, ReplCapability, ReplConfData, SetCommandOptions};
@@ -110,41 +108,38 @@ impl MasterServerInfo {
         }
         let (cancel_tx, mut cancel_rx) = broadcast::channel::<()>(1);
 
-        tokio::time::timeout(Duration::from_millis(10000), async {
-            let slaves = self.slaves.read().await;
-            for slave in slaves.iter() {
-                let tx = Arc::clone(&slave.client_tx);
-                let n = Arc::clone(&n);
-                tokio::spawn(async move {
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let sent = tx.lock().await.send((
-                        Command::ReplConf(vec![ReplConfData::GetAck]),
-                        Some(response_tx),
-                    ));
+        let slaves = self.slaves.read().await;
+        for slave in slaves.iter() {
+            let tx = Arc::clone(&slave.client_tx);
+            let n = Arc::clone(&n);
+            tokio::spawn(async move {
+                let (response_tx, response_rx) = oneshot::channel();
+                let sent = tx.lock().await.send((
+                    Command::ReplConf(vec![ReplConfData::GetAck]),
+                    Some(response_tx),
+                ));
 
-                    if sent.is_err() {
+                if sent.is_err() {
+                    return;
+                }
+
+                select! {
+                    res = response_rx => {
+                        println!("Master server received {:?} from slave proxy", res);
+                        let Ok(Command::ReplConf(confs)) = res else { return };
+                        let [ReplConfData::Ack(_ack)] = confs[..] else { return };
+                        *n.lock().await += 1;
+                    }
+                    _ = cancel_rx.recv() => {
+                        println!("Wait request canceled for slave due to timeout");
                         return;
                     }
+                }
+            });
+            cancel_rx = cancel_tx.subscribe();
+        }
 
-                    select! {
-                        res = response_rx => {
-                            println!("Master server received {:?} from slave proxy", res);
-                            let Ok(Command::ReplConf(confs)) = res else { return };
-                            let [ReplConfData::Ack(_ack)] = confs[..] else { return };
-                            *n.lock().await += 1;
-                        }
-                        res = cancel_rx.recv() => {
-                            println!("Wait request canceled for slave due to timeout");
-                            return;
-                        }
-                    }
-                });
-                cancel_rx = cancel_tx.subscribe();
-            }
-        })
-        .await?;
-
-        println!("Going to cancel!");
+        tokio::time::sleep(Duration::from_millis(timeout as u64)).await;
         cancel_tx.send(())?;
         let n = *n.lock().await;
         Ok(n)
