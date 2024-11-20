@@ -6,10 +6,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::{
-    select,
-    sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
-};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 
 use crate::commands::{Command, ReplCapability, ReplConfData, SetCommandOptions};
 
@@ -106,7 +103,6 @@ impl MasterServerInfo {
         if offset == 0 {
             return Ok(num_replicas as usize);
         }
-        let (cancel_tx, mut cancel_rx) = broadcast::channel::<()>(1);
 
         let slaves = self.slaves.read().await;
         for slave in slaves.iter() {
@@ -124,24 +120,19 @@ impl MasterServerInfo {
                     return;
                 }
 
-                select! {
-                    res = response_rx => {
-                        println!("Master server received {:?} from slave proxy", res);
-                        let Ok(Command::ReplConf(confs)) = res else { return };
-                        let [ReplConfData::Ack(_ack)] = confs[..] else { return };
-                        *n.lock().await += 1;
-                    }
-                    _ = cancel_rx.recv() => {
-                        println!("Wait request canceled for slave due to timeout (slave: {:?})", addr);
-                        return;
-                    }
-                }
+                let res = response_rx.await;
+                println!("Master server received {:?} from slave proxy ({addr})", res);
+                let Ok(Command::ReplConf(confs)) = res else {
+                    return;
+                };
+                let [ReplConfData::Ack(_ack)] = confs[..] else {
+                    return;
+                };
+                *n.lock().await += 1;
             });
-            cancel_rx = cancel_tx.subscribe();
         }
 
         tokio::time::sleep(Duration::from_millis(timeout as u64)).await;
-        cancel_tx.send(())?;
         let n = *n.lock().await;
         Ok(n)
     }
