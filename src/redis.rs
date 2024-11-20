@@ -12,9 +12,9 @@ pub const EMPTY_RDB: [u8; 88] = [
     0xf0, 0x6e, 0x3b, 0xfe, 0xc0, 0xff, 0x5a, 0xa2,
 ];
 
-use tokio::io::AsyncReadExt;
+use tokio::{io::AsyncReadExt, sync::RwLock};
 
-use crate::io_helper::skip_sequence;
+use crate::{commands::SetCommandOptions, io_helper::skip_sequence, resp::RespMessage};
 
 #[derive(Debug)]
 enum LengthValue {
@@ -62,7 +62,7 @@ async fn read_numeric_length<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Re
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum StringValue {
     Str(Vec<u8>),
     Int8(u8),
@@ -185,17 +185,97 @@ impl DatabaseEntry {
 
         Some(SystemTime::UNIX_EPOCH + duration)
     }
+
+    fn is_expired(&self) -> bool {
+        if let Some(expires_on) = self.get_expiry_time() {
+            expires_on < SystemTime::now()
+        } else {
+            false
+        }
+    }
 }
 
 pub struct Database {
-    pub entries: HashMap<StringValue, DatabaseEntry>,
+    entries: RwLock<HashMap<StringValue, DatabaseEntry>>,
 }
 
 impl Database {
     pub fn new() -> Self {
         Database {
-            entries: HashMap::new(),
+            entries: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub async fn set(
+        &self,
+        key: String,
+        value: String,
+        options: SetCommandOptions,
+    ) -> anyhow::Result<RespMessage> {
+        let mut expires_on = None;
+        if let Some(px) = options.px {
+            if let Some(t) = SystemTime::now().checked_add(Duration::from_millis(px)) {
+                let millis = t.duration_since(SystemTime::UNIX_EPOCH)?.as_millis();
+                expires_on = Some(Expiry::InMillis(millis as u64))
+            } else {
+                anyhow::bail!("Invalid px");
+            }
+        }
+
+        self.entries.write().await.insert(
+            key.clone().into(),
+            DatabaseEntry::new((&value).into(), expires_on),
+        );
+
+        Ok(RespMessage::SimpleString(String::from("OK")))
+    }
+
+    pub async fn get(&self, key: String) -> anyhow::Result<RespMessage> {
+        let r_store = self.entries.read().await;
+        let key = &key.into();
+
+        if let Some(entry) = r_store.get(key) {
+            if entry.is_expired() {
+                drop(r_store);
+                let mut w_store = self.entries.write().await;
+                w_store.remove(key);
+                drop(w_store);
+                return Ok(RespMessage::Null);
+            }
+
+            let value = entry.value.to_string();
+            drop(r_store);
+            Ok(RespMessage::BulkString(value))
+        } else {
+            drop(r_store);
+            Ok(RespMessage::Null)
+        }
+    }
+
+    pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {
+        let r_store = self.entries.read().await;
+
+        let mut keys = vec![];
+        let mut expired_keys = vec![];
+        for (key, value) in r_store.iter() {
+            if value.is_expired() {
+                expired_keys.push(key.clone());
+            } else {
+                keys.push(key.clone());
+            }
+        }
+
+        drop(r_store);
+
+        if expired_keys.len() > 0 {
+            let mut w_store = self.entries.write().await;
+
+            for key in expired_keys {
+                w_store.remove(&key);
+            }
+        }
+
+        Ok(keys)
     }
 }
 
@@ -251,7 +331,12 @@ impl Instance {
                         entries.insert(key, DatabaseEntry { expires_on, value });
                     }
 
-                    dbs.insert(index, Database { entries });
+                    dbs.insert(
+                        index,
+                        Database {
+                            entries: RwLock::new(entries),
+                        },
+                    );
                 }
                 SectionId::EndOfFile => {
                     let mut checksum = [0u8; 8];

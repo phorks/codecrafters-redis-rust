@@ -177,6 +177,8 @@ impl FromStr for ReplCapability {
 pub enum ReplConfData {
     ListeningPort(u16),
     Capability(ReplCapability),
+    GetAck,
+    Ack(u32),
 }
 
 impl<T: AsRef<str>> TryFrom<(&T, &T)> for ReplConfData {
@@ -186,6 +188,8 @@ impl<T: AsRef<str>> TryFrom<(&T, &T)> for ReplConfData {
         match value.0.as_ref().to_ascii_lowercase().as_str() {
             "listening-port" => Ok(ReplConfData::ListeningPort(value.1.as_ref().parse()?)),
             "capa" => Ok(ReplConfData::Capability(value.1.as_ref().parse()?)),
+            "getack" if value.1.as_ref() == "*" => Ok(ReplConfData::GetAck),
+            "ack" => Ok(ReplConfData::Ack(value.1.as_ref().parse()?)),
             _ => anyhow::bail!(
                 "Invalid replconf data. Key: {}, Value: {}",
                 value.0.as_ref(),
@@ -374,6 +378,14 @@ impl Command {
                             lines.push(RespMessage::bulk_from_str("capa"));
                             lines.push(RespMessage::BulkString(capa.to_string()));
                         }
+                        ReplConfData::GetAck => {
+                            lines.push(RespMessage::bulk_from_str("GETACK"));
+                            lines.push(RespMessage::bulk_from_str("*"));
+                        }
+                        ReplConfData::Ack(offset) => {
+                            lines.push(RespMessage::bulk_from_str("ACK"));
+                            lines.push(RespMessage::BulkString(offset.to_string()));
+                        }
                     }
                 }
                 lines
@@ -386,11 +398,15 @@ impl Command {
                 ]
             }
             Command::Set(key, value, options) => {
-                vec![
+                let mut lines = vec![
                     RespMessage::bulk_from_str("SET"),
                     RespMessage::BulkString(key.clone()),
                     RespMessage::BulkString(value.clone()),
-                ]
+                ];
+
+                options.append_to_vec(&mut lines);
+
+                lines
             }
             _ => anyhow::bail!("Send command is not supported"),
         };

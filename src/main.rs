@@ -28,17 +28,17 @@ async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Data
 
     println!("Initial db:");
     let mut i = 0;
-    for db in &rdb.dbs {
-        for entry in &db.1.entries {
-            println!(
-                "DB{}: {} = {}",
-                i,
-                entry.0.to_string(),
-                entry.1.value.to_string()
-            );
-        }
-        i += 1;
-    }
+    // for db in &rdb.dbs {
+    //     for entry in &db.1.entries {
+    //         println!(
+    //             "DB{}: {} = {}",
+    //             i,
+    //             entry.0.to_string(),
+    //             entry.1.value.to_string()
+    //         );
+    //     }
+    //     i += 1;
+    // }
 
     rdb.dbs
         .into_iter()
@@ -62,7 +62,7 @@ async fn main() {
         }
     };
 
-    let store = Arc::new(RwLock::new(store));
+    let store = Arc::new(store);
 
     match connect_to_master(&config).await {
         Ok(Some(conn)) => {
@@ -76,6 +76,7 @@ async fn main() {
                     std::net::SocketAddr::V4(conn.addr),
                     store,
                     config,
+                    true,
                 );
                 match client.run().await {
                     Ok(_) => println!("Successfully disconnected from {addr}"),
@@ -95,7 +96,7 @@ async fn main() {
         let config = config.clone();
         println!("Accepted connection from {addr}");
         tokio::spawn(async move {
-            let client = Client::from_stream(stream, addr, store, config);
+            let client = Client::from_stream(stream, addr, store, config, false);
             match client.run().await {
                 Ok(_) => println!("Successfully disconnected from {addr}"),
                 Err(err) => println!("Disconnected because of a failure: {:?}", err),

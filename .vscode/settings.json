@@ -6,6 +6,7 @@
         "dbfilename",
         "exat",
         "FULLRESYNC",
+        "GETACK",
         "keepttl",
         "Psync",
         "pxat",
