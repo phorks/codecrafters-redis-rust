@@ -49,8 +49,9 @@ async fn read_length<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Len
             }
         },
         _ => {
+            // the binary number is shifted right 6 digits, no other case is possible
             unreachable!()
-        } // the binary number is shifted right 6 digits, no other case is possible
+        }
     }
 }
 

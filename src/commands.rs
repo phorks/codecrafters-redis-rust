@@ -136,12 +136,16 @@ impl FromStr for InfoCommandParameter {
 }
 
 impl InfoCommandParameter {
-    pub fn get_sections(&self, config: &ServerConfig) -> Vec<InfoSection> {
+    pub async fn get_sections(&self, config: &ServerConfig) -> Vec<InfoSection> {
         match self {
-            InfoCommandParameter::Single(kind) => vec![kind.get_info(config)],
-            InfoCommandParameter::All => InfoSectionKind::iter()
-                .map(|x| x.get_info(config))
-                .collect(),
+            InfoCommandParameter::Single(kind) => vec![kind.get_info(config).await],
+            InfoCommandParameter::All => {
+                let mut sections = vec![];
+                for kind in InfoSectionKind::iter() {
+                    sections.push(kind.get_info(config).await);
+                }
+                sections
+            }
         }
     }
 }

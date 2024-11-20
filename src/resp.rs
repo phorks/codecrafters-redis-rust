@@ -21,7 +21,26 @@ impl RespMessage {
         RespMessage::SimpleString(String::from(value))
     }
 
-    pub async fn write<T: AsyncWriteExt + Unpin>(self, write: &mut T) -> anyhow::Result<()> {
+    pub fn count_in_bytes(&self) -> usize {
+        match self {
+            RespMessage::Array(items) => {
+                let mut n = 1 + items.len().to_string().len() + 2;
+                for item in items {
+                    n += item.count_in_bytes();
+                }
+                n
+            }
+            RespMessage::BulkString(s) => {
+                let bytes = s.as_bytes();
+                1 + bytes.len().to_string().len() + 2 + bytes.len() + 2
+            }
+            RespMessage::Null => 5,
+            RespMessage::SimpleString(s) => 1 + s.as_bytes().len() + 2,
+            RespMessage::Integer(i) => 1 + i.to_string().len() + 2,
+        }
+    }
+
+    pub async fn write<T: AsyncWriteExt + Unpin>(&self, write: &mut T) -> anyhow::Result<()> {
         match self {
             RespMessage::Array(items) => {
                 write.write_all(b"*").await?;

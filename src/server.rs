@@ -1,12 +1,19 @@
 use std::{
+    borrow::BorrowMut,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
 
-use tokio::sync::{mpsc, RwLock};
+use tokio::{
+    select,
+    sync::{broadcast, mpsc, oneshot, Mutex, RwLock},
+    time::timeout,
+};
 
-use crate::commands::{Command, ReplCapability};
+use crate::commands::{Command, ReplCapability, ReplConfData, SetCommandOptions};
 
 const DEFAULT_PORT: u16 = 6379;
 
@@ -14,40 +21,130 @@ pub struct SlaveClientInfo {
     // should've used uuid
     pub addr: SocketAddr,
     pub capabilities: Vec<ReplCapability>,
-    pub tx: mpsc::UnboundedSender<Command>,
+    pub client_tx: Arc<Mutex<mpsc::UnboundedSender<(Command, Option<oneshot::Sender<Command>>)>>>,
 }
 
 impl SlaveClientInfo {
     pub fn new(
         addr: SocketAddr,
         capabilities: Vec<ReplCapability>,
-        tx: mpsc::UnboundedSender<Command>,
+        client_tx: mpsc::UnboundedSender<(Command, Option<oneshot::Sender<Command>>)>,
     ) -> Self {
         Self {
             addr,
             capabilities,
-            tx,
+            client_tx: Arc::new(Mutex::new(client_tx)),
         }
     }
 }
 
 pub struct MasterServerInfo {
-    pub replid: String,
-    pub repl_offset: u32,
-    pub slaves: RwLock<Vec<SlaveClientInfo>>,
+    replid: String,
+    repl_offset: RwLock<usize>,
+    slaves: RwLock<Vec<SlaveClientInfo>>,
 }
 
 impl MasterServerInfo {
     pub fn new() -> Self {
         MasterServerInfo {
             replid: Self::new_master_replid(),
-            repl_offset: 0,
+            repl_offset: RwLock::new(0),
             slaves: RwLock::new(vec![]),
         }
     }
 
     fn new_master_replid() -> String {
         String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb")
+    }
+
+    pub fn replid(&self) -> &str {
+        &self.replid
+    }
+
+    pub async fn repl_offset(&self) -> usize {
+        self.repl_offset.read().await.clone()
+    }
+
+    pub async fn register_slave(
+        &self,
+        addr: SocketAddr,
+        capas: Vec<ReplCapability>,
+    ) -> mpsc::UnboundedReceiver<(Command, Option<oneshot::Sender<Command>>)> {
+        let (tx, rx) = mpsc::unbounded_channel::<(Command, Option<oneshot::Sender<Command>>)>();
+        self.slaves
+            .write()
+            .await
+            .push(SlaveClientInfo::new(addr, capas, tx));
+
+        rx
+    }
+
+    pub async fn propagate_set(
+        &self,
+        key: &str,
+        value: &str,
+        options: SetCommandOptions,
+    ) -> anyhow::Result<usize> {
+        let command = Command::Set(String::from(key), String::from(value), options.clone());
+
+        {
+            *self.repl_offset.write().await += command.to_resp()?.count_in_bytes();
+        }
+
+        let slaves = self.slaves.read().await;
+        let mut n_received = 0;
+        for slave in slaves.iter() {
+            if let Ok(_) = slave.client_tx.lock().await.send((command.clone(), None)) {
+                n_received += 1;
+            }
+        }
+
+        Ok(n_received)
+    }
+
+    pub async fn wait(&self, num_replicas: u32, timeout: u32) -> anyhow::Result<usize> {
+        let offset = { self.repl_offset().await };
+        let n = Arc::new(Mutex::new(0));
+        if offset == 0 {
+            return Ok(num_replicas as usize);
+        }
+        let (cancel_tx, mut cancel_rx) = broadcast::channel::<()>(1);
+
+        tokio::time::timeout(Duration::from_millis(timeout as u64), async {
+            let slaves = self.slaves.read().await;
+            for slave in slaves.iter() {
+                let tx = Arc::clone(&slave.client_tx);
+                let n = Arc::clone(&n);
+                tokio::spawn(async move {
+                    let (response_tx, response_rx) = oneshot::channel();
+                    let sent = tx.lock().await.send((
+                        Command::ReplConf(vec![ReplConfData::GetAck]),
+                        Some(response_tx),
+                    ));
+
+                    if sent.is_err() {
+                        return;
+                    }
+
+                    select! {
+                        res = response_rx => {
+                            let Ok(Command::ReplConf(confs)) = res else { return };
+                            let [ReplConfData::Ack(_ack)] = confs[..] else { return };
+                            *n.lock().await += 1;
+                        }
+                        _ = cancel_rx.recv() => {
+                            return;
+                        }
+                    }
+                });
+                cancel_rx = cancel_tx.subscribe();
+            }
+        })
+        .await?;
+
+        cancel_tx.send(())?;
+        let n = *n.lock().await;
+        Ok(n)
     }
 }
 

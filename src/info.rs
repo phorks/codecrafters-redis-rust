@@ -62,17 +62,20 @@ impl InfoSection {
 }
 
 impl InfoSectionKind {
-    pub fn get_info(&self, config: &ServerConfig) -> InfoSection {
+    pub async fn get_info(&self, config: &ServerConfig) -> InfoSection {
         match self {
             InfoSectionKind::Replication => {
                 let mut data = HashMap::new();
                 match &config.role {
                     ServerRole::Master(info) => {
                         data.insert(String::from("role"), String::from("master"));
-                        data.insert(String::from("master_replid"), info.replid.clone());
+                        data.insert(
+                            String::from("master_replid"),
+                            String::from(info.replid().clone()),
+                        );
                         data.insert(
                             String::from("master_repl_offset"),
-                            info.repl_offset.to_string(),
+                            info.repl_offset().await.to_string(),
                         );
                     }
                     ServerRole::Slave(_) => {

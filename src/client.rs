@@ -57,15 +57,8 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                         .set(key.clone(), value.clone(), options.clone())
                         .await?;
 
-                    if let ServerRole::Master(master_info) = &self.config.role {
-                        let slaves = master_info.slaves.read().await;
-                        for slave in slaves.iter() {
-                            slave.tx.send(Command::Set(
-                                key.clone(),
-                                value.clone(),
-                                options.clone(),
-                            ))?;
-                        }
+                    if let ServerRole::Master(master) = &self.config.role {
+                        master.propagate_set(&key, &value, options).await?;
                     }
 
                     self.write(resp).await?;
@@ -118,7 +111,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                 }
                 Command::Info(param) => {
                     let mut resp = String::new();
-                    let sections = param.get_sections(&self.config);
+                    let sections = param.get_sections(&self.config).await;
                     for section in sections {
                         section.write(&mut resp)?;
                     }
@@ -177,7 +170,8 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     if replid == "?" && repl_offset == -1 {
                         self.write(RespMessage::SimpleString(format!(
                             "FULLRESYNC {} {}",
-                            my_info.replid, my_info.repl_offset
+                            my_info.replid(),
+                            my_info.repl_offset().await
                         )))
                         .await?;
 
@@ -194,11 +188,9 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     break;
                 }
                 Command::Wait(num_replicas, timeout) => {
-                    if let ServerRole::Master(master_info) = &self.config.role {
-                        let slaves = master_info.slaves.read().await;
-                        let len = slaves.len();
-                        drop(slaves);
-                        self.write(RespMessage::Integer(len as i64)).await?;
+                    if let ServerRole::Master(master) = &self.config.role {
+                        let n = master.wait(num_replicas, timeout).await?;
+                        self.write(RespMessage::Integer(n as i64)).await?;
                     } else {
                         self.write(RespMessage::Integer(0)).await?;
                     }
@@ -208,22 +200,20 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
         }
 
         if let Some((_, SlaveHandshakeState::Ready(port, repl_confs))) = slave_state {
-            self.run_as_slave(port, repl_confs).await
+            self.run_as_slave_proxy(port, repl_confs).await
         } else {
             Ok(())
         }
     }
 
-    async fn run_as_slave(
+    async fn run_as_slave_proxy(
         mut self,
         port: u16,
         repl_confs: Vec<ReplConfData>,
     ) -> anyhow::Result<()> {
-        let ServerRole::Master(master_info) = &self.config.role else {
+        let ServerRole::Master(master) = &self.config.role else {
             anyhow::bail!("Slave connected to non-master")
         };
-
-        let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
 
         let capas = repl_confs
             .into_iter()
@@ -233,11 +223,9 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
             })
             .collect();
 
-        let mut slaves = master_info.slaves.write().await;
-        slaves.push(SlaveClientInfo::new(self.addr.clone(), capas, tx));
-        drop(slaves);
+        let mut rx = master.register_slave(self.addr.clone(), capas).await;
 
-        while let Some(command) = &rx.recv().await {
+        while let Some((command, response)) = rx.recv().await {
             match command {
                 Command::Set(key, value, options) => {
                     let mut lines = vec![
@@ -251,6 +239,12 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     self.write(RespMessage::Array(lines)).await?;
                 }
                 _ => anyhow::bail!("Unexpected command forwarded to slave client {:?}", command),
+            };
+
+            if let Some(channel) = response {
+                channel
+                    .send(Command::from_buffer(&mut self.read).await?)
+                    .unwrap();
             }
         }
 

@@ -1,28 +1,21 @@
 use core::str;
 use std::{
-    io::BufRead,
     net::{SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
-    sync::RwLock,
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    net::{tcp::OwnedWriteHalf, TcpStream},
 };
 
 use crate::{
     commands::{Command, ReplCapability, ReplConfData},
-    io_helper::{read_until_crlf, skip_sequence, CountingBufReader},
+    io_helper::{read_until_crlf, skip_sequence, CountingBufReader, Reader},
     redis::Database,
     resp::RespMessage,
     server::{ServerConfig, ServerRole},
 };
-
-type Reader = CountingBufReader<BufReader<OwnedReadHalf>>;
 
 pub struct MasterConnection {
     pub read: Reader,
@@ -42,10 +35,13 @@ pub struct ReplicationChannel<Write: AsyncWriteExt + Unpin> {
 impl<Write: AsyncWriteExt + Unpin> ReplicationChannel<Write> {
     pub async fn run(mut self) -> anyhow::Result<()> {
         loop {
-            let prev_total_bytes = self.read.reset_total_bytes();
-            let Ok(command) = Command::from_buffer(&mut self.read).await else {
+            let mut counting = self.read.new_counting_scope();
+            let Ok(command) = Command::from_buffer(&mut counting.reader()).await else {
                 break;
             };
+
+            let bytes_read = counting.count_so_far();
+            drop(counting);
 
             match command {
                 Command::Ping => {
@@ -58,7 +54,8 @@ impl<Write: AsyncWriteExt + Unpin> ReplicationChannel<Write> {
                     for conf in confs {
                         match conf {
                             ReplConfData::GetAck => {
-                                Command::ReplConf(vec![ReplConfData::Ack(prev_total_bytes)])
+                                let bytes_before_this = self.read.total_bytes() - bytes_read;
+                                Command::ReplConf(vec![ReplConfData::Ack(bytes_before_this)])
                                     .to_resp()?
                                     .write(&mut self.write)
                                     .await?;
@@ -69,8 +66,6 @@ impl<Write: AsyncWriteExt + Unpin> ReplicationChannel<Write> {
                 }
                 _ => anyhow::bail!("Only SET and GETACK REPLCONF are supported"),
             }
-
-            self.read.add_total_bytes(prev_total_bytes);
         }
 
         Ok(())
@@ -142,7 +137,7 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<M
     let mut buf = vec![0u8; length];
     read.read_exact(&mut buf).await?;
 
-    read.reset_total_bytes();
+    read.reset_counting().unwrap();
 
     Ok(Some(MasterConnection {
         read,
