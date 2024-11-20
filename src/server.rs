@@ -128,11 +128,13 @@ impl MasterServerInfo {
 
                     select! {
                         res = response_rx => {
+                            println!("Master server received {:?} from slave proxy", res);
                             let Ok(Command::ReplConf(confs)) = res else { return };
                             let [ReplConfData::Ack(_ack)] = confs[..] else { return };
                             *n.lock().await += 1;
                         }
                         _ = cancel_rx.recv() => {
+                            println!("Wait request canceled for slave due to timeout");
                             return;
                         }
                     }
