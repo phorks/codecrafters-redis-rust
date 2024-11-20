@@ -110,7 +110,7 @@ impl MasterServerInfo {
         }
         let (cancel_tx, mut cancel_rx) = broadcast::channel::<()>(1);
 
-        tokio::time::timeout(Duration::from_millis(5000), async {
+        tokio::time::timeout(Duration::from_millis(10000), async {
             let slaves = self.slaves.read().await;
             for slave in slaves.iter() {
                 let tx = Arc::clone(&slave.client_tx);
@@ -134,7 +134,6 @@ impl MasterServerInfo {
                             *n.lock().await += 1;
                         }
                         res = cancel_rx.recv() => {
-                            res.unwrap();
                             println!("Wait request canceled for slave due to timeout");
                             return;
                         }
@@ -145,6 +144,7 @@ impl MasterServerInfo {
         })
         .await?;
 
+        println!("Going to cancel!");
         cancel_tx.send(())?;
         let n = *n.lock().await;
         Ok(n)
