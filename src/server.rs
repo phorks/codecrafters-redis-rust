@@ -110,7 +110,7 @@ impl MasterServerInfo {
         }
         let (cancel_tx, mut cancel_rx) = broadcast::channel::<()>(1);
 
-        tokio::time::timeout(Duration::from_millis(timeout as u64), async {
+        tokio::time::timeout(Duration::from_millis(5000), async {
             let slaves = self.slaves.read().await;
             for slave in slaves.iter() {
                 let tx = Arc::clone(&slave.client_tx);
