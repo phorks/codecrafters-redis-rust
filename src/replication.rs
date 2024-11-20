@@ -16,31 +16,41 @@ use tokio::{
 
 use crate::{
     commands::{Command, ReplCapability, ReplConfData},
-    io_helper::{read_until_crlf, skip_sequence},
+    io_helper::{read_until_crlf, skip_sequence, CountingBufReader},
     redis::Database,
     resp::RespMessage,
     server::{ServerConfig, ServerRole},
 };
 
+type Reader = CountingBufReader<BufReader<OwnedReadHalf>>;
+
 pub struct MasterConnection {
-    pub read: BufReader<OwnedReadHalf>,
+    pub read: Reader,
     pub write: OwnedWriteHalf,
     pub addr: SocketAddrV4,
     pub rdb: Vec<u8>,
 }
 
-pub struct ReplicationChannel<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> {
-    read: Read,
+pub struct ReplicationChannel<Write: AsyncWriteExt + Unpin> {
+    read: Reader,
     write: Write,
     addr: SocketAddr,
     store: Arc<Database>,
     config: Arc<ServerConfig>,
 }
 
-impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> ReplicationChannel<Read, Write> {
+impl<Write: AsyncWriteExt + Unpin> ReplicationChannel<Write> {
     pub async fn run(mut self) -> anyhow::Result<()> {
-        while let Ok(command) = Command::from_buffer(&mut self.read).await {
+        loop {
+            let prev_total_bytes = self.read.reset_total_bytes();
+            let Ok(command) = Command::from_buffer(&mut self.read).await else {
+                break;
+            };
+
             match command {
+                Command::Ping => {
+                    // master is alive :)
+                }
                 Command::Set(key, value, options) => {
                     let resp = self.store.set(key, value, options).await?;
                     resp.write(&mut self.write).await?;
@@ -49,7 +59,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> ReplicationCha
                     for conf in confs {
                         match conf {
                             ReplConfData::GetAck => {
-                                Command::ReplConf(vec![ReplConfData::Ack(0)])
+                                Command::ReplConf(vec![ReplConfData::Ack(prev_total_bytes)])
                                     .to_resp()?
                                     .write(&mut self.write)
                                     .await?;
@@ -60,15 +70,17 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> ReplicationCha
                 }
                 _ => anyhow::bail!("Only SET and GETACK REPLCONF are supported"),
             }
+
+            self.read.add_total_bytes(prev_total_bytes);
         }
 
         Ok(())
     }
 }
 
-impl ReplicationChannel<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
+impl ReplicationChannel<OwnedWriteHalf> {
     pub fn new(
-        read: BufReader<OwnedReadHalf>,
+        read: Reader,
         write: OwnedWriteHalf,
         addr: SocketAddr,
         store: Arc<Database>,
@@ -91,7 +103,7 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<M
 
     let stream = TcpStream::connect(master_addr).await?;
     let (read, mut write) = stream.into_split();
-    let mut read = BufReader::new(read);
+    let mut read = CountingBufReader::new(BufReader::new(read));
 
     Command::Ping.to_resp()?.write(&mut write).await?;
 
@@ -130,6 +142,8 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<M
     let length = str::from_utf8(&length)?.parse()?;
     let mut buf = vec![0u8; length];
     read.read_exact(&mut buf).await?;
+
+    read.reset_total_bytes();
 
     Ok(Some(MasterConnection {
         read,

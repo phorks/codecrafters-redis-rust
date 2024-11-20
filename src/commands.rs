@@ -178,7 +178,7 @@ pub enum ReplConfData {
     ListeningPort(u16),
     Capability(ReplCapability),
     GetAck,
-    Ack(u32),
+    Ack(usize),
 }
 
 impl<T: AsRef<str>> TryFrom<(&T, &T)> for ReplConfData {

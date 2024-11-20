@@ -4,11 +4,10 @@ use std::sync::Arc;
 
 use client::Client;
 use redis::{Database, Instance};
-use replication::{connect_to_master, MasterConnection, ReplicationChannel};
+use replication::{connect_to_master, ReplicationChannel};
 use server::ServerConfig;
 use tokio::fs;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 
 mod client;
 mod commands;
