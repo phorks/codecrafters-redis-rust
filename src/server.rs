@@ -91,6 +91,8 @@ impl MasterServerInfo {
         for slave in slaves.iter() {
             if let Ok(_) = slave.client_tx.lock().await.send((command.clone(), None)) {
                 n_received += 1;
+            } else {
+                eprintln!("Failed to send SET command to replica {:?}", slave.addr);
             }
         }
 
