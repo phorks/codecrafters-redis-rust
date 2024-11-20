@@ -194,7 +194,14 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     break;
                 }
                 Command::Wait(num_replicas, timeout) => {
-                    self.write(RespMessage::Integer(0)).await?;
+                    if let ServerRole::Master(master_info) = &self.config.role {
+                        let slaves = master_info.slaves.read().await;
+                        let len = slaves.len();
+                        drop(slaves);
+                        self.write(RespMessage::Integer(len as i64)).await?;
+                    } else {
+                        self.write(RespMessage::Integer(0)).await?;
+                    }
                 }
             };
             n_commands += 1;
