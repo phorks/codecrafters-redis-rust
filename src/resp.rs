@@ -68,7 +68,7 @@ impl RespMessage {
                 write.write_all(b"\r\n").await?;
             }
             RespMessage::Integer(i) => {
-                write.write_all(b":7\r\n").await?;
+                write.write_all(b":2\r\n").await?;
             }
         }
 
