@@ -190,6 +190,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                 Command::Wait(num_replicas, timeout) => {
                     if let ServerRole::Master(master) = &self.config.role {
                         let n = master.wait(num_replicas, timeout).await?;
+                        println!("Wait response: {}", n);
                         self.write(RespMessage::Integer(n as i64)).await?;
                     } else {
                         self.write(RespMessage::Integer(0)).await?;
