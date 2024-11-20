@@ -191,7 +191,6 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     if let ServerRole::Master(master) = &self.config.role {
                         let n = master.wait(num_replicas, timeout).await?;
                         println!("Wait response: {}", (n as i64).to_string());
-                        self.write.write_all(":".as_bytes()).await;
                         self.write(RespMessage::Integer(n as i64)).await?;
                     } else {
                         self.write(RespMessage::Integer(0)).await?;
