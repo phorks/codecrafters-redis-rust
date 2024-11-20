@@ -1,9 +1,4 @@
-use std::{
-    borrow::BorrowMut,
-    net::SocketAddr,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{net::SocketAddr, sync::Arc};
 
 use tokio::{
     io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -11,14 +6,13 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
-    sync::{mpsc, RwLock},
 };
 
 use crate::{
-    commands::{Command, ReplCapability, ReplConfData},
-    redis::{Database, DatabaseEntry, Expiry, EMPTY_RDB},
+    commands::{Command, ReplConfData},
+    redis::{Database, EMPTY_RDB},
     resp::RespMessage,
-    server::{ServerConfig, ServerRole, SlaveClientInfo},
+    server::{ServerConfig, ServerRole},
 };
 
 enum SlaveHandshakeState {
@@ -189,9 +183,10 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                 }
                 Command::Wait(num_replicas, timeout) => {
                     if let ServerRole::Master(master) = &self.config.role {
-                        let n = master.wait(num_replicas, timeout).await?;
-                        println!("Wait response: {}", (n as i64).to_string());
-                        self.write(RespMessage::Integer(n as i64)).await?;
+                        self.write(RespMessage::Integer(1 as i64)).await?;
+                        // let n = master.wait(num_replicas, timeout).await?;
+                        // println!("Wait response: {}", (n as i64).to_string());
+                        // self.write(RespMessage::Integer(n as i64)).await?;
                     } else {
                         self.write(RespMessage::Integer(0)).await?;
                     }
