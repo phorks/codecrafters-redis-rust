@@ -131,7 +131,7 @@ impl MasterServerInfo {
                         *n.lock().await += 1;
                     }
                     _ = cancel_rx.recv() => {
-                        println!("Wait request canceled for slave due to timeout");
+                        println!("Wait request canceled for slave due to timeout (slave: {:?})", slave.addr);
                         return;
                     }
                 }
