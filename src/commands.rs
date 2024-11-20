@@ -251,7 +251,8 @@ impl Command {
         let Some(params_line) = lines.next_line().await? else {
             anyhow::bail!("Empty params line")
         };
-        println!("Received line: {}", params_line);
+
+        // println!("Received line: {}", params_line);
         let n_params = params_line.as_str()[1..].parse::<usize>()? - 1;
 
         let name = read_param(&mut lines).await?;
