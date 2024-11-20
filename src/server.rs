@@ -134,7 +134,7 @@ impl MasterServerInfo {
             });
         }
 
-        tokio::time::sleep(Duration::from_millis(timeout as u64)).await;
+        tokio::time::sleep(Duration::from_millis(10000 as u64)).await;
         let n = *n.lock().await;
         Ok(n)
     }
