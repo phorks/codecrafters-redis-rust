@@ -4,13 +4,37 @@ use std::{
     str::FromStr,
 };
 
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::sync::{mpsc, RwLock};
+
+use crate::commands::{Command, ReplCapability};
 
 const DEFAULT_PORT: u16 = 6379;
+
+pub struct SlaveClientInfo {
+    // should've used uuid
+    pub addr: SocketAddr,
+    pub capabilities: Vec<ReplCapability>,
+    pub tx: mpsc::UnboundedSender<Command>,
+}
+
+impl SlaveClientInfo {
+    pub fn new(
+        addr: SocketAddr,
+        capabilities: Vec<ReplCapability>,
+        tx: mpsc::UnboundedSender<Command>,
+    ) -> Self {
+        Self {
+            addr,
+            capabilities,
+            tx,
+        }
+    }
+}
 
 pub struct MasterServerInfo {
     pub replid: String,
     pub repl_offset: u32,
+    pub slaves: RwLock<Vec<SlaveClientInfo>>,
 }
 
 impl MasterServerInfo {
@@ -18,6 +42,7 @@ impl MasterServerInfo {
         MasterServerInfo {
             replid: Self::new_master_replid(),
             repl_offset: 0,
+            slaves: RwLock::new(vec![]),
         }
     }
 
@@ -108,5 +133,12 @@ impl ServerConfig {
 
     pub fn port(&self) -> u16 {
         self.port.unwrap_or(DEFAULT_PORT)
+    }
+
+    pub fn is_master(&self) -> bool {
+        match self.role {
+            ServerRole::Master(_) => true,
+            ServerRole::Slave(_) => false,
+        }
     }
 }

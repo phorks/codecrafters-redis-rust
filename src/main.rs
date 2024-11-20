@@ -1,6 +1,5 @@
 use std::env;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use client::new_client;
@@ -8,7 +7,6 @@ use redis::{Database, Instance};
 use replication::connect_to_master;
 use server::ServerConfig;
 use tokio::fs;
-use tokio::net::unix::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
@@ -76,7 +74,7 @@ async fn main() {
         let config = config.clone();
         println!("Accepted connection from {addr}");
         tokio::spawn(async move {
-            let client = new_client(stream, store, config);
+            let client = new_client(stream, addr, store, config);
             match client.run().await {
                 Ok(_) => println!("Successfully disconnected from {addr}"),
                 Err(err) => println!("Disconnected because of a failure: {:?}", err),

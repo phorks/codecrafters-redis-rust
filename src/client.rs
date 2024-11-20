@@ -1,37 +1,49 @@
 use std::{
-    collections::HashMap,
+    borrow::BorrowMut,
+    net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use tokio::{
-    fs,
     io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
-    sync::RwLock,
+    sync::{mpsc, RwLock},
 };
 
 use crate::{
-    commands::{Command, InfoCommandParameter},
-    redis::{Database, DatabaseEntry, Expiry, Instance, StringValue, EMPTY_RDB},
+    commands::{Command, ReplCapability, ReplConfData},
+    redis::{Database, DatabaseEntry, Expiry, EMPTY_RDB},
     resp::RespMessage,
-    server::{ServerConfig, ServerRole},
+    server::{ServerConfig, ServerRole, SlaveClientInfo},
 };
+
+enum SlaveHandshakeState {
+    PingReceived,
+    PortReceived(u16),
+    CapaReceived(u16, Vec<ReplConfData>),
+    Ready(u16, Vec<ReplConfData>),
+}
 
 pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> {
     read: Read,
     write: Write,
+    addr: SocketAddr,
     store: Arc<RwLock<Database>>,
     config: Arc<ServerConfig>,
 }
 
 impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Write> {
     pub async fn run(mut self) -> anyhow::Result<()> {
+        let mut n_commands = 0;
+        let mut slave_state: Option<(u64, SlaveHandshakeState)> = None;
+
         while let Ok(command) = Command::from_buffer(&mut self.read).await {
             println!("Received command: {:?}", command);
             match command {
                 Command::Ping => {
                     self.write(RespMessage::SimpleString("PONG".into())).await?;
+                    slave_state = Some((n_commands, SlaveHandshakeState::PingReceived));
                 }
                 Command::Echo(message) => {
                     self.write(RespMessage::BulkString(message.clone())).await?;
@@ -46,11 +58,22 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                             anyhow::bail!("Invalid px");
                         }
                     }
-                    self.store
-                        .write()
-                        .await
-                        .entries
-                        .insert(key.into(), DatabaseEntry::new((&value).into(), expires_on));
+
+                    self.store.write().await.entries.insert(
+                        key.clone().into(),
+                        DatabaseEntry::new((&value).into(), expires_on),
+                    );
+
+                    if let ServerRole::Master(master_info) = &self.config.role {
+                        let slaves = master_info.slaves.read().await;
+                        for slave in slaves.iter() {
+                            slave.tx.send(Command::Set(
+                                key.clone(),
+                                value.clone(),
+                                options.clone(),
+                            ))?;
+                        }
+                    }
 
                     self.write(RespMessage::SimpleString("OK".into())).await?;
                 }
@@ -119,22 +142,6 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
 
                         self.write(RespMessage::Array(keys)).await?;
                     }
-                    // if pattern == "*" || pattern == "\"*\"" {
-                    //     let Some(db_path) = self.config.db_path() else {
-                    //         anyhow::bail!("Database file is not specified.")
-                    //     };
-                    //
-                    //     let mut file = fs::File::open(db_path).await?;
-                    //     let rdb = Instance::new(&mut file).await?;
-                    //     let keys = rdb
-                    //         .dbs
-                    //         .values()
-                    //         .flat_map(|x| x.entries.keys())
-                    //         .map(|x| RespMessage::BulkString(x.to_string()))
-                    //         .collect();
-                    //
-                    //     self.write(RespMessage::Array(keys)).await?;
-                    // }
                 }
                 Command::Info(param) => {
                     let mut resp = String::new();
@@ -145,13 +152,54 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
 
                     self.write(RespMessage::BulkString(resp)).await?;
                 }
-                Command::ReplConf(_) => {
+                Command::ReplConf(data) => {
+                    let Some((n, prev_state)) = &slave_state else {
+                        anyhow::bail!("Unexpected replconf command")
+                    };
+
+                    if *n != n_commands - 1 {
+                        anyhow::bail!("Illegal handshake pattern");
+                    }
+
+                    slave_state = match (prev_state, &data[..]) {
+                        (
+                            SlaveHandshakeState::PingReceived,
+                            [ReplConfData::ListeningPort(port)],
+                        ) => Some((n_commands, SlaveHandshakeState::PortReceived(port.clone()))),
+                        (SlaveHandshakeState::PortReceived(port), _) => {
+                            if data.iter().any(|x| match x {
+                                ReplConfData::ListeningPort(_) => true,
+                                _ => false,
+                            }) {
+                                anyhow::bail!(
+                                    "Listening port is already set. Illegal handshake pattern"
+                                );
+                            }
+
+                            Some((
+                                (n_commands),
+                                SlaveHandshakeState::CapaReceived(port.clone(), data),
+                            ))
+                        }
+                        _ => anyhow::bail!("Illegal handshake pattern"),
+                    };
+
                     self.write(RespMessage::simple_from_str("OK")).await?;
                 }
                 Command::Psync(replid, repl_offset) => {
                     let ServerRole::Master(my_info) = &self.config.role else {
                         anyhow::bail!("I am not the master :)")
                     };
+
+                    let Some((n, SlaveHandshakeState::CapaReceived(port, repl_confs))) =
+                        slave_state
+                    else {
+                        anyhow::bail!("Unexpected replconf command")
+                    };
+
+                    if n != n_commands - 1 {
+                        anyhow::bail!("Illegal handshake pattern");
+                    }
 
                     if replid == "?" && repl_offset == -1 {
                         self.write(RespMessage::SimpleString(format!(
@@ -168,11 +216,62 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
                     } else {
                         anyhow::bail!("Not implemented")
                     }
+
+                    slave_state = Some((0, SlaveHandshakeState::Ready(port, repl_confs)));
+                    break;
                 }
             };
+            n_commands += 1;
         }
 
-        return Ok(());
+        if let Some((_, SlaveHandshakeState::Ready(port, repl_confs))) = slave_state {
+            self.run_as_slave(port, repl_confs).await
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn run_as_slave(
+        mut self,
+        port: u16,
+        repl_confs: Vec<ReplConfData>,
+    ) -> anyhow::Result<()> {
+        let ServerRole::Master(master_info) = &self.config.role else {
+            anyhow::bail!("Slave connected to non-master")
+        };
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
+
+        let capas = repl_confs
+            .into_iter()
+            .filter_map(|x| match x {
+                ReplConfData::Capability(repl_capability) => Some(repl_capability),
+                _ => None,
+            })
+            .collect();
+
+        let mut slaves = master_info.slaves.write().await;
+        slaves.push(SlaveClientInfo::new(self.addr.clone(), capas, tx));
+        drop(slaves);
+
+        while let Some(command) = &rx.recv().await {
+            match command {
+                Command::Set(key, value, options) => {
+                    let mut lines = vec![
+                        RespMessage::bulk_from_str("SET"),
+                        RespMessage::BulkString(key.clone()),
+                        RespMessage::BulkString(value.clone()),
+                    ];
+
+                    options.append_to_vec(&mut lines);
+
+                    self.write(RespMessage::Array(lines)).await?;
+                }
+                _ => anyhow::bail!("Unexpected command forwarded to slave client {:?}", command),
+            }
+        }
+
+        Ok(())
     }
 
     async fn write(&mut self, message: RespMessage) -> anyhow::Result<()> {
@@ -182,6 +281,7 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
 
 pub fn new_client(
     stream: TcpStream,
+    addr: SocketAddr,
     store: Arc<RwLock<Database>>,
     config: Arc<ServerConfig>,
 ) -> Client<tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>, tokio::net::tcp::OwnedWriteHalf> {
@@ -191,6 +291,7 @@ pub fn new_client(
     Client {
         read,
         write,
+        addr,
         store,
         config,
     }

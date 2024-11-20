@@ -1,5 +1,5 @@
 use core::str;
-use std::str::FromStr;
+use std::{collections::btree_map::Keys, str::FromStr};
 
 use tokio::io::{AsyncBufReadExt, Lines};
 
@@ -9,7 +9,7 @@ use crate::{
     server::ServerConfig,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SetCommandOptions {
     pub ex: Option<u64>, // seconds -- Set the specified expire time, in seconds (a positive integer).
     pub px: Option<u64>, // milliseconds -- Set the specified expire time, in milliseconds (a positive integer).
@@ -34,38 +34,48 @@ impl SetCommandOptions {
 
         let mut it = params.iter();
         while let Some(param) = it.next() {
-            if param.eq_ignore_ascii_case("ex") {
-                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
-                    ex = Some(val);
-                } else {
-                    anyhow::bail!("Invalid ex parameter");
+            match param.to_ascii_lowercase().as_ref() {
+                "ex" => {
+                    if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                        ex = Some(val);
+                    } else {
+                        anyhow::bail!("Invalid ex parameter");
+                    }
                 }
-            } else if param.eq_ignore_ascii_case("px") {
-                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
-                    px = Some(val);
-                } else {
-                    anyhow::bail!("Invalid px parameter");
+                "px" => {
+                    if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                        px = Some(val);
+                    } else {
+                        anyhow::bail!("Invalid px parameter");
+                    }
                 }
-            } else if param.eq_ignore_ascii_case("exat") {
-                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
-                    exat = Some(val);
-                } else {
-                    anyhow::bail!("Invalid exat parameter");
+                "exat" => {
+                    if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                        exat = Some(val);
+                    } else {
+                        anyhow::bail!("Invalid exat parameter");
+                    }
                 }
-            } else if param.eq_ignore_ascii_case("pxat") {
-                if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
-                    pxat = Some(val);
-                } else {
-                    anyhow::bail!("Invalid pxat parameter");
+                "pxat" => {
+                    if let Some(val) = it.next().and_then(|next| next.parse::<u64>().ok()) {
+                        pxat = Some(val);
+                    } else {
+                        anyhow::bail!("Invalid pxat parameter");
+                    }
                 }
-            } else if param.eq_ignore_ascii_case("nx") {
-                nx = true;
-            } else if param.eq_ignore_ascii_case("xx") {
-                xx = true;
-            } else if param.eq_ignore_ascii_case("keepttl") {
-                keepttl = true;
-            } else if param.eq_ignore_ascii_case("get") {
-                get = true;
+                "nx" => {
+                    nx = true;
+                }
+                "xx" => {
+                    xx = true;
+                }
+                "keepttl" => {
+                    keepttl = true;
+                }
+                "get" => {
+                    get = true;
+                }
+                _ => anyhow::bail!("Unknown SET option: {}", param),
             }
         }
 
@@ -80,9 +90,34 @@ impl SetCommandOptions {
             get,
         })
     }
+
+    pub fn append_to_vec(&self, mut lines: &mut Vec<RespMessage>) {
+        Self::append_option("ex", &self.ex, &mut lines);
+        Self::append_option("px", &self.px, &mut lines);
+        Self::append_option("exat", &self.exat, &mut lines);
+        Self::append_option("pxat", &self.pxat, &mut lines);
+
+        Self::append_bool("nx", self.nx, &mut lines);
+        Self::append_bool("keepttl", self.keepttl, &mut lines);
+        Self::append_bool("get", self.get, &mut lines);
+        Self::append_bool("get", self.nx, &mut lines);
+    }
+
+    fn append_option(key: &'static str, value: &Option<u64>, options: &mut Vec<RespMessage>) {
+        if let Some(value) = value {
+            options.push(RespMessage::bulk_from_str(key));
+            options.push(RespMessage::BulkString(value.to_string()));
+        }
+    }
+
+    fn append_bool(key: &'static str, value: bool, options: &mut Vec<RespMessage>) {
+        if value {
+            options.push(RespMessage::bulk_from_str(key));
+        }
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InfoCommandParameter {
     Single(InfoSectionKind),
     All,
@@ -111,7 +146,7 @@ impl InfoCommandParameter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ReplCapability {
     Psync2,
     Eof,
@@ -138,7 +173,7 @@ impl FromStr for ReplCapability {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ReplConfData {
     ListeningPort(u16),
     Capability(ReplCapability),
@@ -160,7 +195,7 @@ impl<T: AsRef<str>> TryFrom<(&T, &T)> for ReplConfData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Ping,
     Echo(String),
@@ -348,6 +383,13 @@ impl Command {
                     RespMessage::bulk_from_str("PSYNC"),
                     RespMessage::BulkString(replid.clone()),
                     RespMessage::BulkString(repl_offset.to_string()),
+                ]
+            }
+            Command::Set(key, value, options) => {
+                vec![
+                    RespMessage::bulk_from_str("SET"),
+                    RespMessage::BulkString(key.clone()),
+                    RespMessage::BulkString(value.clone()),
                 ]
             }
             _ => anyhow::bail!("Send command is not supported"),
