@@ -17,6 +17,7 @@ mod redis;
 mod replication;
 mod resp;
 mod server;
+mod slave_proxy;
 
 async fn create_database_from_file(config: &ServerConfig) -> anyhow::Result<Database> {
     let db_path = config

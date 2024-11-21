@@ -13,6 +13,7 @@ use crate::{
     redis::{Database, EMPTY_RDB},
     resp::RespMessage,
     server::{ServerConfig, ServerRole},
+    slave_proxy::{propagate_commands, receive_acks},
 };
 
 enum SlaveHandshakeState {
@@ -22,7 +23,7 @@ enum SlaveHandshakeState {
     Ready(u16, Vec<ReplConfData>),
 }
 
-pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> {
+pub struct Client<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWriteExt + Unpin> {
     read: Read,
     write: Write,
     addr: SocketAddr,
@@ -30,7 +31,9 @@ pub struct Client<Read: AsyncBufReadExt + Unpin, Write: AsyncWriteExt + Unpin> {
     config: Arc<ServerConfig>,
 }
 
-impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Write> {
+impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
+    Client<Read, Write>
+{
     pub async fn run(mut self) -> anyhow::Result<()> {
         let mut n_commands = 0;
         let mut slave_state: Option<(u64, SlaveHandshakeState)> = None;
@@ -218,40 +221,17 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
             })
             .collect();
 
-        let mut rx = master.register_slave(self.addr.clone(), capas).await;
+        let (id, rx) = master.register_slave(self.addr.clone(), capas).await;
 
-        while let Some((command, response)) = rx.recv().await {
-            match &command {
-                Command::Set(_, _, _) => {
-                    println!("Propagating {:?} to save {:?}", command, self.addr);
-                    self.write(command.to_resp()?).await?;
-                }
-                Command::ReplConf(confs) => {
-                    if let [ReplConfData::GetAck] = confs[..] {
-                        self.write(Command::ReplConf(vec![ReplConfData::GetAck]).to_resp()?)
-                            .await?;
-                    } else {
-                        anyhow::bail!(
-                            "Unexpected REPLCONF command forwarded to slave client {:?}",
-                            confs
-                        );
-                    }
-                }
-                _ => anyhow::bail!("Unexpected command forwarded to slave client {:?}", command),
-            };
+        let write = self.write;
+        let read = self.read;
+        let config = Arc::clone(&self.config);
 
-            if let Some(channel) = response {
-                let response = Command::from_buffer(&mut self.read).await?;
-                println!(
-                    "Slave proxy received command {:?} from the slave",
-                    &response
-                );
+        let incoming = tokio::spawn(receive_acks(id, read, config));
 
-                if let Err(err) = channel.send(response) {
-                    eprintln!("Slave proxy failed to send response to the replication channel. Request: {:?}, Err: {:?}", command, err);
-                }
-            }
-        }
+        propagate_commands(id, self.addr, write, rx).await?;
+
+        incoming.await??;
 
         Ok(())
     }

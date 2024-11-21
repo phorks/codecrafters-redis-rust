@@ -1,8 +1,12 @@
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     str::FromStr,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -14,21 +18,26 @@ const DEFAULT_PORT: u16 = 6379;
 
 pub struct SlaveClientInfo {
     // should've used uuid
+    id: u32,
     pub addr: SocketAddr,
     pub capabilities: Vec<ReplCapability>,
-    pub client_tx: Arc<Mutex<mpsc::UnboundedSender<(Command, Option<oneshot::Sender<Command>>)>>>,
+    pub client_tx: Arc<Mutex<mpsc::UnboundedSender<Command>>>,
+    offset: usize,
 }
 
 impl SlaveClientInfo {
     pub fn new(
+        id: u32,
         addr: SocketAddr,
         capabilities: Vec<ReplCapability>,
-        client_tx: mpsc::UnboundedSender<(Command, Option<oneshot::Sender<Command>>)>,
+        client_tx: mpsc::UnboundedSender<Command>,
     ) -> Self {
         Self {
+            id,
             addr,
             capabilities,
             client_tx: Arc::new(Mutex::new(client_tx)),
+            offset: 0,
         }
     }
 }
@@ -36,7 +45,8 @@ impl SlaveClientInfo {
 pub struct MasterServerInfo {
     replid: String,
     repl_offset: RwLock<usize>,
-    slaves: RwLock<Vec<SlaveClientInfo>>,
+    slaves: RwLock<HashMap<u32, SlaveClientInfo>>,
+    max_id: AtomicU32,
 }
 
 impl MasterServerInfo {
@@ -44,7 +54,8 @@ impl MasterServerInfo {
         MasterServerInfo {
             replid: Self::new_master_replid(),
             repl_offset: RwLock::new(0),
-            slaves: RwLock::new(vec![]),
+            slaves: RwLock::new(HashMap::new()),
+            max_id: AtomicU32::new(0),
         }
     }
 
@@ -64,14 +75,29 @@ impl MasterServerInfo {
         &self,
         addr: SocketAddr,
         capas: Vec<ReplCapability>,
-    ) -> mpsc::UnboundedReceiver<(Command, Option<oneshot::Sender<Command>>)> {
-        let (tx, rx) = mpsc::unbounded_channel::<(Command, Option<oneshot::Sender<Command>>)>();
+    ) -> (u32, mpsc::UnboundedReceiver<Command>) {
+        let (tx, rx) = mpsc::unbounded_channel::<Command>();
+        let id = self.max_id.fetch_add(1, Ordering::SeqCst);
+
         self.slaves
             .write()
             .await
-            .push(SlaveClientInfo::new(addr, capas, tx));
+            .insert(id, SlaveClientInfo::new(id, addr, capas, tx));
 
-        rx
+        (id, rx)
+    }
+
+    pub async fn register_ack(&self, slave_id: u32, offset: usize) -> anyhow::Result<usize> {
+        let mut slaves = self.slaves.write().await;
+        let slave = slaves
+            .get_mut(&slave_id)
+            .ok_or(anyhow::anyhow!("No slave with the given id {}", slave_id))?;
+
+        if slave.offset < offset {
+            slave.offset = offset
+        }
+
+        Ok(slave.offset)
     }
 
     pub async fn propagate_set(
@@ -89,10 +115,10 @@ impl MasterServerInfo {
         let slaves = self.slaves.read().await;
         let mut n_received = 0;
         for slave in slaves.iter() {
-            if let Ok(_) = slave.client_tx.lock().await.send((command.clone(), None)) {
+            if let Ok(_) = slave.1.client_tx.lock().await.send(command.clone()) {
                 n_received += 1;
             } else {
-                eprintln!("Failed to send SET command to replica {:?}", slave.addr);
+                eprintln!("Failed to send SET command to replica {:?}", slave.1.addr);
             }
         }
 
@@ -100,45 +126,41 @@ impl MasterServerInfo {
     }
 
     pub async fn wait(&self, num_replicas: u32, timeout: u32) -> anyhow::Result<usize> {
-        let offset = { self.repl_offset().await };
-        let n = Arc::new(Mutex::new(0));
+        let command = Command::ReplConf(vec![ReplConfData::GetAck]);
+        let offset = {
+            let mut repl_offset = self.repl_offset.write().await;
+            let n = *repl_offset;
+            *repl_offset += command.to_resp()?.count_in_bytes();
+            n
+        };
+
         if offset == 0 {
             return Ok(num_replicas as usize);
         }
 
-        let slaves = self.slaves.read().await;
-        for slave in slaves.iter() {
-            let tx = Arc::clone(&slave.client_tx);
-            let n = Arc::clone(&n);
-            let addr = slave.addr.clone();
-            tokio::spawn(async move {
-                let (response_tx, response_rx) = oneshot::channel();
-                let sent = tx.lock().await.send((
-                    Command::ReplConf(vec![ReplConfData::GetAck]),
-                    Some(response_tx),
-                ));
+        {
+            let slaves = self.slaves.read().await;
+            for slave in slaves.values() {
+                let tx = Arc::clone(&slave.client_tx);
+                let sent = tx
+                    .lock()
+                    .await
+                    .send(Command::ReplConf(vec![ReplConfData::GetAck]));
 
                 if sent.is_err() {
-                    return;
+                    continue;
                 }
-
-                let res = response_rx.await;
-                println!(
-                    "Master server received {:?} from slave proxy (master offset: {}, {addr})",
-                    res, offset
-                );
-                let Ok(Command::ReplConf(confs)) = res else {
-                    return;
-                };
-                let [ReplConfData::Ack(_ack)] = confs[..] else {
-                    return;
-                };
-                *n.lock().await += 1;
-            });
+            }
         }
 
         tokio::time::sleep(Duration::from_millis(timeout as u64)).await;
-        let n = *n.lock().await;
+        let n = self
+            .slaves
+            .read()
+            .await
+            .values()
+            .filter(|x| x.offset == offset)
+            .count();
         Ok(n)
     }
 }
