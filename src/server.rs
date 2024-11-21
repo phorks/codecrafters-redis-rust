@@ -78,12 +78,12 @@ impl MasterServerInfo {
     ) -> (u32, mpsc::UnboundedReceiver<Command>) {
         let (tx, rx) = mpsc::unbounded_channel::<Command>();
         let id = self.max_id.fetch_add(1, Ordering::SeqCst);
-        println!("Slave registered!");
 
         self.slaves
             .write()
             .await
             .insert(id, SlaveClientInfo::new(id, addr, capas, tx));
+        println!("Slave registered! {}", self.slaves.read().await.len());
 
         (id, rx)
     }
