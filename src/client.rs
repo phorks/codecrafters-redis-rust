@@ -224,7 +224,10 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         .get_stream_entries_in_range(&key, start, end)
                         .await?;
 
-                    println!("{:?}", entries.to_resp());
+                    let mut ss = Vec::<u8>::new();
+                    entries.to_resp().write(&mut ss).await?;
+                    let s = String::from_utf8(ss).unwrap();
+                    println!("{}", s);
 
                     self.write(entries.to_resp()).await?;
                 }
