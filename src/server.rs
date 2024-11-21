@@ -139,6 +139,7 @@ impl MasterServerInfo {
         println!("Offset for wait {}", offset);
         if offset == 0 {
             let n = self.slaves.read().await.len();
+            println!("Response {}", n);
             return Ok(n);
         }
 
