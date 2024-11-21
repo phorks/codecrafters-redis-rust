@@ -19,7 +19,9 @@ use crate::{
     commands::SetCommandOptions,
     io_helper::skip_sequence,
     resp::RespMessage,
-    streams::{StreamEntryId, StreamValue, XaddStreamEntryId},
+    streams::{
+        InvalidStreamEntryId, NewStreamEntryId, StreamEntryId, StreamValue, XaddStreamEntryId,
+    },
 };
 
 #[derive(Debug)]
@@ -277,6 +279,13 @@ impl Database {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn get_new_stream_entry_id(
+        &self,
+        stream_key: &str,
+        entry_id: XaddStreamEntryId,
+    ) -> anyhow::Result<NewStreamEntryId> {
     }
 
     pub async fn add_stream_entry(
