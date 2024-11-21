@@ -61,7 +61,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     self.write(resp).await?;
                 }
                 Command::Get(key) => {
-                    let resp = self.store.get(key).await?;
+                    let resp = self.store.get(&key).await?;
                     self.write(resp.into()).await?;
                 }
                 Command::Config(action, params) => {
