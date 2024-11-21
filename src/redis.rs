@@ -1,5 +1,6 @@
 use std::{
     collections::{btree_map::Entry, hash_map, HashMap},
+    str::FromStr,
     time::{Duration, SystemTime},
 };
 
@@ -14,7 +15,12 @@ pub const EMPTY_RDB: [u8; 88] = [
 
 use tokio::{io::AsyncReadExt, sync::RwLock};
 
-use crate::{commands::SetCommandOptions, io_helper::skip_sequence, resp::RespMessage};
+use crate::{
+    commands::SetCommandOptions,
+    io_helper::skip_sequence,
+    resp::RespMessage,
+    streams::{StreamEntryId, StreamValue, XaddStreamEntryId},
+};
 
 #[derive(Debug)]
 enum LengthValue {
@@ -167,38 +173,6 @@ pub enum Expiry {
 }
 
 #[derive(Clone)]
-pub struct StreamValue {
-    entries: HashMap<String, HashMap<String, String>>,
-}
-
-impl StreamValue {
-    pub fn new() -> Self {
-        Self {
-            entries: HashMap::new(),
-        }
-    }
-
-    pub async fn get_entry_value(&self, entry_id: &str, key: &str) -> Option<&str> {
-        let entry = self.entries.get(entry_id)?;
-        entry.get(key).map(|x| x.as_str())
-    }
-
-    fn add_entry(
-        &mut self,
-        entry_id: String,
-        values: HashMap<String, String>,
-    ) -> anyhow::Result<()> {
-        match self.entries.entry(entry_id) {
-            hash_map::Entry::Occupied(_) => anyhow::bail!("An record with the same key exists."),
-            hash_map::Entry::Vacant(v) => {
-                v.insert(values);
-                Ok(())
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
 pub enum EntryValue {
     String(StringValue),
     Stream(StreamValue),
@@ -308,9 +282,9 @@ impl Database {
     pub async fn add_stream_entry(
         &self,
         key: &str,
-        entry_id: String,
+        entry_id: XaddStreamEntryId,
         values: HashMap<String, String>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<StreamEntryId> {
         let mut store = self.entries.write().await;
         let stream = store
             .entry(key.into())
@@ -325,7 +299,11 @@ impl Database {
             panic!("The entry is inserted in a way that its value must be stream");
         };
 
-        stream.add_entry(entry_id, values)
+        let entry_id = stream.generate_entry_id(entry_id);
+
+        stream.add_entry(entry_id.clone(), values)?;
+
+        Ok(entry_id)
     }
 
     pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {

@@ -7,6 +7,7 @@ use crate::{
     info::{InfoSection, InfoSectionKind},
     resp::RespMessage,
     server::ServerConfig,
+    streams::{StreamEntryId, XaddStreamEntryId},
 };
 
 #[derive(Debug, Clone)]
@@ -216,7 +217,7 @@ pub enum Command {
     Psync(String, i32),
     Wait(u32, u32),
     Type(String),
-    Xadd(String, String, HashMap<String, String>),
+    Xadd(String, XaddStreamEntryId, HashMap<String, String>),
 }
 
 impl Command {
@@ -398,7 +399,7 @@ impl Command {
                 }
 
                 let key = read_param(&mut lines).await?;
-                let entry_id = read_param(&mut lines).await?;
+                let entry_id = read_param(&mut lines).await?.parse()?;
 
                 let mut n_values = n_params - 2;
 

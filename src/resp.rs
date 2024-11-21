@@ -10,6 +10,7 @@ pub enum RespMessage {
     Null,
     SimpleString(String),
     Integer(i64),
+    SimpleError(String),
 }
 
 impl RespMessage {
@@ -37,6 +38,7 @@ impl RespMessage {
             RespMessage::Null => 5,
             RespMessage::SimpleString(s) => 1 + s.as_bytes().len() + 2,
             RespMessage::Integer(i) => 1 + i.to_string().len() + 2,
+            RespMessage::SimpleError(s) => 1 + s.as_bytes().len() + 2,
         }
     }
 
@@ -71,6 +73,9 @@ impl RespMessage {
                 write.write_all(b":").await?;
                 write.write_all(i.to_string().as_bytes()).await?;
                 write.write_all(b"\r\n").await?;
+            }
+            RespMessage::SimpleError(s) => {
+                write.write_all(format!("-{}\r\n", s).as_bytes()).await?;
             }
         }
 

@@ -14,6 +14,7 @@ use crate::{
     resp::RespMessage,
     server::{ServerConfig, ServerRole},
     slave_proxy::{propagate_commands, receive_acks},
+    streams::InvalidStreamEntryId,
 };
 
 enum SlaveHandshakeState {
@@ -203,10 +204,20 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     self.write(RespMessage::simple_from_str(typ)).await?;
                 }
                 Command::Xadd(key, entry_id, values) => {
-                    self.store
-                        .add_stream_entry(&key, entry_id.clone(), values)
-                        .await?;
-                    self.write(RespMessage::BulkString(entry_id)).await?;
+                    let result = self.store.add_stream_entry(&key, entry_id, values).await;
+
+                    match result {
+                        Ok(entry_id) => {
+                            self.write(RespMessage::BulkString(entry_id.to_string()))
+                                .await?;
+                        }
+                        Err(e) => match e.downcast::<InvalidStreamEntryId>() {
+                            Ok(e) => {
+                                self.write(e.to_resp()).await?;
+                            }
+                            Err(e) => return Err(e),
+                        },
+                    }
                 }
             };
             n_commands += 1;
