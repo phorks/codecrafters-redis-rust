@@ -123,7 +123,10 @@ impl MasterServerInfo {
                 }
 
                 let res = response_rx.await;
-                println!("Master server received {:?} from slave proxy ({addr})", res);
+                println!(
+                    "Master server received {:?} from slave proxy (master offset: {}, {addr})",
+                    res, offset
+                );
                 let Ok(Command::ReplConf(confs)) = res else {
                     return;
                 };
