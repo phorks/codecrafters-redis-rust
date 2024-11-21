@@ -69,10 +69,7 @@ impl InfoSectionKind {
                 match &config.role {
                     ServerRole::Master(info) => {
                         data.insert(String::from("role"), String::from("master"));
-                        data.insert(
-                            String::from("master_replid"),
-                            String::from(info.replid().clone()),
-                        );
+                        data.insert(String::from("master_replid"), String::from(info.replid()));
                         data.insert(
                             String::from("master_repl_offset"),
                             info.repl_offset().await.to_string(),

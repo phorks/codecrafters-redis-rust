@@ -222,11 +222,9 @@ impl<Read: AsyncBufReadExt + Unpin, Write: AsyncWrite + Unpin> Client<Read, Writ
 
         while let Some((command, response)) = rx.recv().await {
             match &command {
-                Command::Set(key, value, options) => {
-                    self.write(
-                        Command::Set(key.clone(), value.clone(), options.clone()).to_resp()?,
-                    )
-                    .await?;
+                Command::Set(_, _, _) => {
+                    println!("Propagating {:?} to save {:?}", command, self.addr);
+                    self.write(command.to_resp()?).await?;
                 }
                 Command::ReplConf(confs) => {
                     if let [ReplConfData::GetAck] = confs[..] {
