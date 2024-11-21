@@ -2,18 +2,19 @@ use std::{
     collections::{hash_map, HashMap},
     fmt,
     str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::resp::RespMessage;
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub struct StreamEntryId {
-    millis: u64,
+    millis: u128,
     seq_no: usize,
 }
 
 impl StreamEntryId {
-    pub fn new(millis: u64, seq_no: usize) -> Self {
+    pub fn new(millis: u128, seq_no: usize) -> Self {
         Self { millis, seq_no }
     }
 
@@ -72,7 +73,7 @@ impl fmt::Display for InvalidStreamEntryId {
 #[derive(Debug, Clone)]
 pub enum XaddStreamEntryId {
     Explicit(StreamEntryId),
-    GenerateSeqNo(u64),
+    GenerateSeqNo(u128),
     GenerateBoth,
 }
 
@@ -171,17 +172,15 @@ impl StreamValue {
         }
     }
 
-    fn generate_entry_id(
-        &self,
-        xadd_entry_id: XaddStreamEntryId,
-    ) -> Result<StreamEntryId, InvalidStreamEntryId> {
+    fn generate_entry_id(&self, xadd_entry_id: XaddStreamEntryId) -> anyhow::Result<StreamEntryId> {
         match xadd_entry_id {
-            XaddStreamEntryId::Explicit(explicit) => {
-                self.validate_entry_id(&explicit).map(|_| explicit)
-            }
+            XaddStreamEntryId::Explicit(explicit) => self
+                .validate_entry_id(&explicit)
+                .map(|_| explicit)
+                .map_err(|e| anyhow::anyhow!(e)),
             XaddStreamEntryId::GenerateSeqNo(millis) => {
                 if millis < self.top_entry_id.millis {
-                    Err(InvalidStreamEntryId::EqualOrSmallerThanTop(
+                    anyhow::bail!(InvalidStreamEntryId::EqualOrSmallerThanTop(
                         self.top_entry_id.clone(),
                     ))
                 } else if millis == self.top_entry_id.millis {
@@ -193,7 +192,30 @@ impl StreamValue {
                     Ok(StreamEntryId { millis, seq_no: 0 })
                 }
             }
-            XaddStreamEntryId::GenerateBoth => todo!(),
+            XaddStreamEntryId::GenerateBoth => {
+                let now = Self::now();
+
+                let seq_no = match now.cmp(&self.top_entry_id.millis) {
+                    std::cmp::Ordering::Less => {
+                        anyhow::bail!("Time travel is not supported (for now)")
+                    }
+                    std::cmp::Ordering::Equal => self.top_entry_id.seq_no + 1,
+                    std::cmp::Ordering::Greater => 0,
+                };
+
+                Ok(StreamEntryId {
+                    millis: now,
+                    seq_no,
+                })
+            }
         }
+    }
+
+    #[inline]
+    fn now() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
     }
 }
