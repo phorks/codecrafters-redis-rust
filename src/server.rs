@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
     time::Duration,
@@ -47,6 +47,7 @@ pub struct MasterServerInfo {
     repl_offset: RwLock<usize>,
     slaves: RwLock<HashMap<u32, SlaveClientInfo>>,
     max_id: AtomicU32,
+    is_empty: RwLock<bool>,
 }
 
 impl MasterServerInfo {
@@ -56,6 +57,7 @@ impl MasterServerInfo {
             repl_offset: RwLock::new(0),
             slaves: RwLock::new(HashMap::new()),
             max_id: AtomicU32::new(0),
+            is_empty: RwLock::new(true),
         }
     }
 
@@ -112,6 +114,7 @@ impl MasterServerInfo {
 
         {
             *self.repl_offset.write().await += command.to_resp()?.count_in_bytes();
+            *self.is_empty.write().await = false;
         }
 
         let slaves = self.slaves.read().await;
@@ -137,7 +140,7 @@ impl MasterServerInfo {
         };
 
         println!("Offset for wait {}", offset);
-        if offset == 0 {
+        if offset == 0 || { *self.is_empty.read().await } {
             let n = self.slaves.read().await.len();
             println!("Response {}", n);
             return Ok(n);
