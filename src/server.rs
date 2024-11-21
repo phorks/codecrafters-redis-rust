@@ -137,7 +137,8 @@ impl MasterServerInfo {
 
         println!("Offset for wait {}", offset);
         if offset == 0 {
-            return Ok(num_replicas as usize);
+            let n = self.slaves.read().await.len();
+            return Ok(n);
         }
 
         {
