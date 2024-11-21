@@ -224,6 +224,8 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         .get_stream_entries_in_range(&key, start, end)
                         .await?;
 
+                    println!("{:?}", entries.to_resp());
+
                     self.write(entries.to_resp()).await?;
                 }
             };

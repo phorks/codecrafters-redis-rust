@@ -8,6 +8,7 @@ use crate::{
     streams::StreamEntryId,
 };
 
+#[derive(Debug)]
 pub enum RespMessage {
     Array(Vec<RespMessage>),
     BulkString(String),
