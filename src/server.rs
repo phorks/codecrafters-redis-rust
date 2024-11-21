@@ -85,7 +85,6 @@ impl MasterServerInfo {
             .write()
             .await
             .insert(id, SlaveClientInfo::new(id, addr, capas, tx));
-        println!("Slave registered! {}", self.slaves.read().await.len());
 
         (id, rx)
     }
@@ -97,7 +96,6 @@ impl MasterServerInfo {
             .ok_or(anyhow::anyhow!("No slave with the given id {}", slave_id))?;
 
         if slave.offset < offset {
-            println!("Slave {} acked with {}", slave_id, offset);
             slave.offset = offset
         }
 
@@ -139,10 +137,8 @@ impl MasterServerInfo {
             n
         };
 
-        println!("Offset for wait {}", offset);
         if offset == 0 || { *self.is_empty.read().await } {
             let n = self.slaves.read().await.len();
-            println!("Response {}", n);
             return Ok(n);
         }
 

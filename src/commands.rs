@@ -215,6 +215,7 @@ pub enum Command {
     ReplConf(Vec<ReplConfData>),
     Psync(String, i32),
     Wait(u32, u32),
+    Type(String),
 }
 
 impl Command {
@@ -374,6 +375,18 @@ impl Command {
                 let timeout = read_param(&mut lines).await?.parse()?;
 
                 Ok(Command::Wait(num_replicas, timeout))
+            }
+            "type" => {
+                if n_params != 1 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for WAIT (required 1, received {})",
+                        n_params
+                    )
+                }
+
+                let key = read_param(&mut lines).await?;
+
+                Ok(Command::Type(key))
             }
             _ => anyhow::bail!("Unknown command"),
         }

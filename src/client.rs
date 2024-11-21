@@ -193,6 +193,14 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         self.write(RespMessage::Integer(0)).await?;
                     }
                 }
+                Command::Type(key) => {
+                    let typ = match self.store.get(key).await? {
+                        RespMessage::Null => "none",
+                        _ => "string",
+                    };
+
+                    self.write(RespMessage::simple_from_str(typ)).await?;
+                }
             };
             n_commands += 1;
         }
