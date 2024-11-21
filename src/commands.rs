@@ -218,6 +218,7 @@ pub enum Command {
     Wait(u32, u32),
     Type(String),
     Xadd(String, XaddStreamEntryId, HashMap<String, String>),
+    Xrange(String, StreamEntryId, StreamEntryId),
 }
 
 impl Command {
@@ -417,6 +418,20 @@ impl Command {
                 }
 
                 Ok(Command::Xadd(key, entry_id, values))
+            }
+            "xrange" => {
+                if n_params != 3 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for WAIT (required 3, received {})",
+                        n_params
+                    )
+                }
+
+                let key = read_param(&mut lines).await?;
+                let start = StreamEntryId::parse_as_range_start(&read_param(&mut lines).await?)?;
+                let end = StreamEntryId::parse_as_range_end(&read_param(&mut lines).await?)?;
+
+                Ok(Command::Xrange(key, start, end))
             }
             _ => anyhow::bail!("Unknown command"),
         }

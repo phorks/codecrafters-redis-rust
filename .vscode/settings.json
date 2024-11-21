@@ -15,6 +15,7 @@
         "REPLCONFIG",
         "replicaof",
         "replid",
-        "Xadd"
+        "Xadd",
+        "Xrange"
     ]
 }

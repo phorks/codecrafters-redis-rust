@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map, HashMap},
+    collections::{hash_map, BTreeMap, BinaryHeap, HashMap},
     fmt,
     str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
@@ -9,13 +9,34 @@ use crate::resp::RespMessage;
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub struct StreamEntryId {
-    millis: u128,
-    seq_no: usize,
+    millis: u64,
+    seq_no: u64,
 }
 
 impl StreamEntryId {
-    pub fn new(millis: u128, seq_no: usize) -> Self {
+    pub fn new(millis: u64, seq_no: u64) -> Self {
         Self { millis, seq_no }
+    }
+
+    fn parse_as_range_bound(s: &str, default_seq_no: u64) -> anyhow::Result<Self> {
+        match s.split_once('-') {
+            Some((millis_str, seq_no_str)) => Ok(Self {
+                millis: millis_str.parse()?,
+                seq_no: seq_no_str.parse()?,
+            }),
+            None => Ok(Self {
+                millis: s.parse()?,
+                seq_no: default_seq_no,
+            }),
+        }
+    }
+
+    pub fn parse_as_range_start(s: &str) -> anyhow::Result<Self> {
+        Self::parse_as_range_bound(s, 0)
+    }
+
+    pub fn parse_as_range_end(s: &str) -> anyhow::Result<Self> {
+        Self::parse_as_range_bound(s, u64::MAX)
     }
 
     pub fn is_min(&self) -> bool {
@@ -73,7 +94,7 @@ impl fmt::Display for InvalidStreamEntryId {
 #[derive(Debug, Clone)]
 pub enum XaddStreamEntryId {
     Explicit(StreamEntryId),
-    GenerateSeqNo(u128),
+    GenerateSeqNo(u64),
     GenerateBoth,
 }
 
@@ -143,6 +164,25 @@ impl StreamValue {
         Ok(entry_id)
     }
 
+    pub fn get_entries_in_range(
+        &self,
+        start: &StreamEntryId,
+        end: &StreamEntryId,
+    ) -> BTreeMap<StreamEntryId, HashMap<String, String>> {
+        // FIXME this is approach is inefficient. It is of O(n + mlogm) where n is
+        // the total number of entries in the stream and m is the number of entries in the given range.
+        // Redis does it in O(m), while keeping entry insertion in O(1) by leveraging Radix tries
+        let mut map = BTreeMap::new();
+
+        for (key, value) in &self.entries {
+            if key >= start && key <= end {
+                map.insert(key.clone(), value.clone());
+            }
+        }
+
+        map
+    }
+
     fn add_entry_unchecked(
         &mut self,
         entry_id: StreamEntryId,
@@ -193,7 +233,7 @@ impl StreamValue {
                 }
             }
             XaddStreamEntryId::GenerateBoth => {
-                let now = Self::now();
+                let now = Self::now() as u64;
 
                 let seq_no = match now.cmp(&self.top_entry_id.millis) {
                     std::cmp::Ordering::Less => {

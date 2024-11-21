@@ -1,8 +1,12 @@
 use core::str;
+use std::collections::{BTreeMap, HashMap};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
-use crate::io_helper::{read_until_crlf, skip_crlf};
+use crate::{
+    io_helper::{read_until_crlf, skip_crlf},
+    streams::StreamEntryId,
+};
 
 pub enum RespMessage {
     Array(Vec<RespMessage>),
@@ -11,6 +15,61 @@ pub enum RespMessage {
     SimpleString(String),
     Integer(i64),
     SimpleError(String),
+}
+
+trait ToRespMap<K: ToResp, V: ToResp> {}
+impl<K: ToResp, V: ToResp> ToRespMap<K, V> for HashMap<K, V> {}
+impl<K: ToResp, V: ToResp> ToRespMap<K, V> for BTreeMap<K, V> {}
+
+pub trait ToResp {
+    fn to_resp(&self) -> RespMessage;
+}
+
+impl ToResp for &str {
+    fn to_resp(&self) -> RespMessage {
+        RespMessage::bulk_from_str(&self.as_ref())
+    }
+}
+
+impl ToResp for String {
+    fn to_resp(&self) -> RespMessage {
+        RespMessage::BulkString(self.clone())
+    }
+}
+
+impl ToResp for StreamEntryId {
+    fn to_resp(&self) -> RespMessage {
+        self.to_string().to_resp()
+    }
+}
+
+impl<K: ToResp, V: ToResp> ToResp for HashMap<K, V> {
+    fn to_resp(&self) -> RespMessage {
+        let items = self
+            .into_iter()
+            .flat_map(|x| [x.0.to_resp(), x.1.to_resp()])
+            .collect();
+
+        RespMessage::Array(items)
+    }
+}
+
+impl<K: ToResp, V: ToResp> ToResp for BTreeMap<K, V> {
+    fn to_resp(&self) -> RespMessage {
+        let items = self
+            .into_iter()
+            .flat_map(|x| [x.0.to_resp(), x.1.to_resp()])
+            .collect();
+
+        RespMessage::Array(items)
+    }
+}
+
+impl<V: ToResp> ToResp for Vec<V> {
+    fn to_resp(&self) -> RespMessage {
+        let items = self.into_iter().map(|x| x.to_resp()).collect();
+        RespMessage::Array(items)
+    }
 }
 
 impl RespMessage {

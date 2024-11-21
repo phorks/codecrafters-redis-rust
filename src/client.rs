@@ -11,7 +11,7 @@ use tokio::{
 use crate::{
     commands::{Command, ReplConfData},
     redis::{Database, EntryValue, EMPTY_RDB},
-    resp::RespMessage,
+    resp::{RespMessage, ToResp},
     server::{ServerConfig, ServerRole},
     slave_proxy::{propagate_commands, receive_acks},
     streams::InvalidStreamEntryId,
@@ -208,8 +208,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 
                     match result {
                         Ok(entry_id) => {
-                            self.write(RespMessage::BulkString(entry_id.to_string()))
-                                .await?;
+                            self.write(entry_id.to_resp()).await?;
                         }
                         Err(e) => match e.downcast::<InvalidStreamEntryId>() {
                             Ok(e) => {
@@ -218,6 +217,14 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                             Err(e) => return Err(e),
                         },
                     }
+                }
+                Command::Xrange(key, start, end) => {
+                    let entries = self
+                        .store
+                        .get_stream_entries_in_range(&key, start, end)
+                        .await?;
+
+                    self.write(entries.to_resp()).await?;
                 }
             };
             n_commands += 1;

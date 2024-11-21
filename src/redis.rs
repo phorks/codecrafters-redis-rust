@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, hash_map, HashMap},
+    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
     str::FromStr,
     time::{Duration, SystemTime},
 };
@@ -13,7 +13,10 @@ pub const EMPTY_RDB: [u8; 88] = [
     0xf0, 0x6e, 0x3b, 0xfe, 0xc0, 0xff, 0x5a, 0xa2,
 ];
 
-use tokio::{io::AsyncReadExt, sync::RwLock};
+use tokio::{
+    io::AsyncReadExt,
+    sync::{RwLock, RwLockWriteGuard},
+};
 
 use crate::{
     commands::SetCommandOptions,
@@ -279,12 +282,11 @@ impl Database {
         }
     }
 
-    pub async fn add_stream_entry(
+    async fn with_stream<T, F: FnOnce(&mut StreamValue) -> anyhow::Result<T>>(
         &self,
         key: &str,
-        entry_id: XaddStreamEntryId,
-        values: HashMap<String, String>,
-    ) -> anyhow::Result<StreamEntryId> {
+        f: F,
+    ) -> anyhow::Result<T> {
         let mut store = self.entries.write().await;
         let stream = store
             .entry(key.into())
@@ -299,8 +301,29 @@ impl Database {
             panic!("The entry is inserted in a way that its value must be stream");
         };
 
-        let entry_id = stream.xadd(entry_id, values)?;
-        Ok(entry_id)
+        f(stream)
+    }
+
+    pub async fn add_stream_entry(
+        &self,
+        key: &str,
+        entry_id: XaddStreamEntryId,
+        values: HashMap<String, String>,
+    ) -> anyhow::Result<StreamEntryId> {
+        self.with_stream(key, move |stream| stream.xadd(entry_id, values))
+            .await
+    }
+
+    pub async fn get_stream_entries_in_range(
+        &self,
+        key: &str,
+        start: StreamEntryId,
+        end: StreamEntryId,
+    ) -> anyhow::Result<BTreeMap<StreamEntryId, HashMap<String, String>>> {
+        self.with_stream(key, move |stream| {
+            Ok(stream.get_entries_in_range(&start, &end))
+        })
+        .await
     }
 
     pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {
