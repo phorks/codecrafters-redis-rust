@@ -130,13 +130,16 @@ impl StreamValue {
             anyhow::bail!(validation_error);
         };
 
-        match self.entries.entry(entry_id) {
+        match self.entries.entry(entry_id.clone()) {
             hash_map::Entry::Occupied(_) => anyhow::bail!("An record with the same key exists."),
             hash_map::Entry::Vacant(v) => {
                 v.insert(values);
-                Ok(())
             }
         }
+
+        self.top_entry_id = entry_id;
+
+        Ok(())
     }
 
     pub fn validate_entry_id(&self, entry_id: &StreamEntryId) -> Option<InvalidStreamEntryId> {
