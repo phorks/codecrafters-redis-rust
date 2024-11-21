@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     commands::{Command, ReplConfData},
-    redis::{Database, EMPTY_RDB},
+    redis::{Database, EntryValue, EMPTY_RDB},
     resp::RespMessage,
     server::{ServerConfig, ServerRole},
     slave_proxy::{propagate_commands, receive_acks},
@@ -62,7 +62,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                 }
                 Command::Get(key) => {
                     let resp = self.store.get(key).await?;
-                    self.write(resp).await?;
+                    self.write(resp.into()).await?;
                 }
                 Command::Config(action, params) => {
                     if action.eq_ignore_ascii_case("get") {
@@ -195,8 +195,9 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                 }
                 Command::Type(key) => {
                     let typ = match self.store.get(key).await? {
-                        RespMessage::Null => "none",
-                        _ => "string",
+                        Some(EntryValue::String(_)) => "string",
+                        Some(EntryValue::Stream(_)) => "stream",
+                        None => "none",
                     };
 
                     self.write(RespMessage::simple_from_str(typ)).await?;
@@ -213,7 +214,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
     }
 
     async fn run_as_slave_proxy(
-        mut self,
+        self,
         port: u16,
         repl_confs: Vec<ReplConfData>,
     ) -> anyhow::Result<()> {

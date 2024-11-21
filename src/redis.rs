@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{btree_map::Entry, HashMap},
     time::{Duration, SystemTime},
 };
 
@@ -166,13 +166,32 @@ pub enum Expiry {
     InMillis(u64),
 }
 
+#[derive(Clone)]
+pub struct StreamValue {}
+
+#[derive(Clone)]
+pub enum EntryValue {
+    String(StringValue),
+    Stream(StreamValue),
+}
+
+impl From<Option<EntryValue>> for RespMessage {
+    fn from(value: Option<EntryValue>) -> Self {
+        match value {
+            Some(EntryValue::String(s)) => RespMessage::BulkString(s.to_string()),
+            Some(EntryValue::Stream(_)) => todo!(),
+            None => RespMessage::Null,
+        }
+    }
+}
+
 pub struct DatabaseEntry {
-    pub value: StringValue,
+    pub value: EntryValue,
     pub expires_on: Option<Expiry>,
 }
 
 impl DatabaseEntry {
-    pub fn new(value: StringValue, expires_on: Option<Expiry>) -> Self {
+    pub fn new(value: EntryValue, expires_on: Option<Expiry>) -> Self {
         DatabaseEntry { value, expires_on }
     }
 
@@ -225,13 +244,13 @@ impl Database {
 
         self.entries.write().await.insert(
             key.clone().into(),
-            DatabaseEntry::new((&value).into(), expires_on),
+            DatabaseEntry::new(EntryValue::String((&value).into()), expires_on),
         );
 
         Ok(RespMessage::SimpleString(String::from("OK")))
     }
 
-    pub async fn get(&self, key: String) -> anyhow::Result<RespMessage> {
+    pub async fn get(&self, key: String) -> anyhow::Result<Option<EntryValue>> {
         let r_store = self.entries.read().await;
         let key = &key.into();
 
@@ -241,15 +260,12 @@ impl Database {
                 let mut w_store = self.entries.write().await;
                 w_store.remove(key);
                 drop(w_store);
-                return Ok(RespMessage::Null);
+                return Ok(None);
             }
 
-            let value = entry.value.to_string();
-            drop(r_store);
-            Ok(RespMessage::BulkString(value))
+            Ok(Some(entry.value.clone()))
         } else {
-            drop(r_store);
-            Ok(RespMessage::Null)
+            Ok(None)
         }
     }
 
@@ -329,7 +345,13 @@ impl Instance {
                         let key = read_string(&mut buf).await?;
                         let value = read_string(&mut buf).await?;
 
-                        entries.insert(key, DatabaseEntry { expires_on, value });
+                        entries.insert(
+                            key,
+                            DatabaseEntry {
+                                expires_on,
+                                value: EntryValue::String(value),
+                            },
+                        );
                     }
 
                     dbs.insert(
