@@ -18,10 +18,6 @@ pub enum RespMessage {
     SimpleError(String),
 }
 
-trait ToRespMap<K: ToResp, V: ToResp> {}
-impl<K: ToResp, V: ToResp> ToRespMap<K, V> for HashMap<K, V> {}
-impl<K: ToResp, V: ToResp> ToRespMap<K, V> for BTreeMap<K, V> {}
-
 pub trait ToResp {
     fn to_resp(&self) -> RespMessage;
 }

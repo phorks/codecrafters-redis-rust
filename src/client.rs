@@ -12,6 +12,7 @@ use crate::{
     commands::{Command, ReplConfData},
     redis::{Database, EntryValue, EMPTY_RDB},
     resp::{RespMessage, ToResp},
+    resp_ext::{ToMapRespArray, ToStringResp},
     server::{ServerConfig, ServerRole},
     slave_proxy::{propagate_commands, receive_acks},
     streams::InvalidStreamEntryId,
@@ -224,12 +225,19 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         .get_stream_entries_in_range(&key, start, end)
                         .await?;
 
-                    let mut ss = Vec::<u8>::new();
-                    entries.to_resp().write(&mut ss).await?;
-                    let s = String::from_utf8(ss).unwrap();
-                    println!("{}", s);
+                    let resp = entries
+                        .iter()
+                        .map(|x| {
+                            (
+                                x.0.to_bulk_string(),
+                                x.1.iter()
+                                    .map(|y| (y.0.to_bulk_string(), y.1.to_bulk_string()))
+                                    .to_flattened_map_resp_array(),
+                            )
+                        })
+                        .to_map_resp_array();
 
-                    self.write(entries.to_resp()).await?;
+                    self.write(resp).await?;
                 }
             };
             n_commands += 1;

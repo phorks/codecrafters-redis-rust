@@ -16,6 +16,7 @@ mod io_helper;
 mod redis;
 mod replication;
 mod resp;
+mod resp_ext;
 mod server;
 mod slave_proxy;
 mod streams;
