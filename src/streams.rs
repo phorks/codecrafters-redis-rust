@@ -69,21 +69,6 @@ impl fmt::Display for InvalidStreamEntryId {
     }
 }
 
-pub struct NewStreamEntryId {
-    id: StreamEntryId,
-    stream_key: String,
-}
-
-impl NewStreamEntryId {
-    pub fn id(&self) -> &StreamEntryId {
-        &self.id
-    }
-
-    pub fn stream_key(&self) -> &str {
-        &self.stream_key
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum XaddStreamEntryId {
     Explicit(StreamEntryId),
@@ -119,15 +104,13 @@ impl FromStr for XaddStreamEntryId {
 
 #[derive(Clone)]
 pub struct StreamValue {
-    key: String,
     entries: HashMap<StreamEntryId, HashMap<String, String>>,
     top_entry_id: StreamEntryId,
 }
 
 impl StreamValue {
-    pub fn new(key: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            key,
             entries: HashMap::new(),
             top_entry_id: StreamEntryId::default(),
         }
@@ -140,26 +123,43 @@ impl StreamValue {
 
     pub fn add_entry(
         &mut self,
-        entry_id: NewStreamEntryId,
+        entry_id: StreamEntryId,
         values: HashMap<String, String>,
     ) -> anyhow::Result<()> {
-        if entry_id.stream_key != self.key {
-            anyhow::bail!("The entry id does not belong to this stream");
-        }
+        self.add_entry_unchecked(entry_id, values)
+    }
 
-        match self.entries.entry(entry_id.id().clone()) {
-            hash_map::Entry::Occupied(_) => anyhow::bail!("An record with the same key exists."),
+    pub fn xadd(
+        &mut self,
+        entry_id: XaddStreamEntryId,
+        values: HashMap<String, String>,
+    ) -> anyhow::Result<StreamEntryId> {
+        let entry_id = self
+            .generate_entry_id(entry_id)
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        self.add_entry_unchecked(entry_id.clone(), values)?;
+        Ok(entry_id)
+    }
+
+    fn add_entry_unchecked(
+        &mut self,
+        entry_id: StreamEntryId,
+        values: HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        match self.entries.entry(entry_id.clone()) {
+            hash_map::Entry::Occupied(_) => anyhow::bail!("A record with the same key exists."),
             hash_map::Entry::Vacant(v) => {
                 v.insert(values);
             }
         }
 
-        self.top_entry_id = entry_id.id;
+        self.top_entry_id = entry_id;
 
         Ok(())
     }
 
-    pub fn validate_entry_id(&self, entry_id: &StreamEntryId) -> Result<(), InvalidStreamEntryId> {
+    fn validate_entry_id(&self, entry_id: &StreamEntryId) -> Result<(), InvalidStreamEntryId> {
         if entry_id <= &self.top_entry_id {
             Err(if self.top_entry_id.is_min() {
                 InvalidStreamEntryId::EqualToMin
@@ -171,16 +171,13 @@ impl StreamValue {
         }
     }
 
-    pub fn generate_entry_id(
+    fn generate_entry_id(
         &self,
         xadd_entry_id: XaddStreamEntryId,
-    ) -> Result<NewStreamEntryId, InvalidStreamEntryId> {
+    ) -> Result<StreamEntryId, InvalidStreamEntryId> {
         match xadd_entry_id {
             XaddStreamEntryId::Explicit(explicit) => {
-                self.validate_entry_id(&explicit).map(|_| NewStreamEntryId {
-                    id: explicit,
-                    stream_key: self.key.clone(),
-                })
+                self.validate_entry_id(&explicit).map(|_| explicit)
             }
             XaddStreamEntryId::GenerateSeqNo(millis) => {
                 if millis < self.top_entry_id.millis {
@@ -188,18 +185,12 @@ impl StreamValue {
                         self.top_entry_id.clone(),
                     ))
                 } else if millis == self.top_entry_id.millis {
-                    Ok(NewStreamEntryId {
-                        id: StreamEntryId {
-                            millis,
-                            seq_no: self.top_entry_id.seq_no + 1,
-                        },
-                        stream_key: self.key.clone(),
+                    Ok(StreamEntryId {
+                        millis,
+                        seq_no: self.top_entry_id.seq_no + 1,
                     })
                 } else {
-                    Ok(NewStreamEntryId {
-                        id: StreamEntryId { millis, seq_no: 0 },
-                        stream_key: self.key.clone(),
-                    })
+                    Ok(StreamEntryId { millis, seq_no: 0 })
                 }
             }
             XaddStreamEntryId::GenerateBoth => todo!(),

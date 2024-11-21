@@ -19,9 +19,7 @@ use crate::{
     commands::SetCommandOptions,
     io_helper::skip_sequence,
     resp::RespMessage,
-    streams::{
-        InvalidStreamEntryId, NewStreamEntryId, StreamEntryId, StreamValue, XaddStreamEntryId,
-    },
+    streams::{StreamEntryId, StreamValue, XaddStreamEntryId},
 };
 
 #[derive(Debug)]
@@ -281,13 +279,6 @@ impl Database {
         }
     }
 
-    pub fn get_new_stream_entry_id(
-        &self,
-        stream_key: &str,
-        entry_id: XaddStreamEntryId,
-    ) -> anyhow::Result<NewStreamEntryId> {
-    }
-
     pub async fn add_stream_entry(
         &self,
         key: &str,
@@ -308,10 +299,7 @@ impl Database {
             panic!("The entry is inserted in a way that its value must be stream");
         };
 
-        let entry_id = stream.generate_entry_id(entry_id);
-
-        stream.add_entry(entry_id.clone(), values)?;
-
+        let entry_id = stream.xadd(entry_id, values)?;
         Ok(entry_id)
     }
 
