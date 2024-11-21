@@ -161,7 +161,7 @@ impl StreamValue {
 
     fn validate_entry_id(&self, entry_id: &StreamEntryId) -> Result<(), InvalidStreamEntryId> {
         if entry_id <= &self.top_entry_id {
-            Err(if self.top_entry_id.is_min() {
+            Err(if entry_id.is_min() {
                 InvalidStreamEntryId::EqualToMin
             } else {
                 InvalidStreamEntryId::EqualOrSmallerThanTop(self.top_entry_id.clone())
