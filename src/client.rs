@@ -194,13 +194,19 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     }
                 }
                 Command::Type(key) => {
-                    let typ = match self.store.get(key).await? {
+                    let typ = match self.store.get(&key).await? {
                         Some(EntryValue::String(_)) => "string",
                         Some(EntryValue::Stream(_)) => "stream",
                         None => "none",
                     };
 
                     self.write(RespMessage::simple_from_str(typ)).await?;
+                }
+                Command::Xadd(key, entry_id, values) => {
+                    self.store
+                        .add_stream_entry(&key, entry_id.clone(), values)
+                        .await?;
+                    self.write(RespMessage::BulkString(entry_id)).await?;
                 }
             };
             n_commands += 1;

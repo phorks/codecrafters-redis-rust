@@ -1,5 +1,5 @@
 use core::str;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use tokio::io::{AsyncBufReadExt, Lines};
 
@@ -216,6 +216,7 @@ pub enum Command {
     Psync(String, i32),
     Wait(u32, u32),
     Type(String),
+    Xadd(String, String, HashMap<String, String>),
 }
 
 impl Command {
@@ -387,6 +388,34 @@ impl Command {
                 let key = read_param(&mut lines).await?;
 
                 Ok(Command::Type(key))
+            }
+            "xadd" => {
+                if n_params < 2 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for WAIT (required at least 2, received {})",
+                        n_params
+                    )
+                }
+
+                let key = read_param(&mut lines).await?;
+                let entry_id = read_param(&mut lines).await?;
+
+                let mut n_values = n_params - 2;
+
+                if n_values % 2 != 0 {
+                    anyhow::bail!("Incorrect key-value pairs format.")
+                }
+
+                n_values /= 2;
+
+                let mut values = HashMap::new();
+                for _ in 0..n_values {
+                    let key = read_param(&mut lines).await?;
+                    let value = read_param(&mut lines).await?;
+                    values.insert(key, value);
+                }
+
+                Ok(Command::Xadd(key, entry_id, values))
             }
             _ => anyhow::bail!("Unknown command"),
         }

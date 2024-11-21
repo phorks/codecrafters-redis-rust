@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, HashMap},
+    collections::{btree_map::Entry, hash_map, HashMap},
     time::{Duration, SystemTime},
 };
 
@@ -167,7 +167,36 @@ pub enum Expiry {
 }
 
 #[derive(Clone)]
-pub struct StreamValue {}
+pub struct StreamValue {
+    entries: HashMap<String, HashMap<String, String>>,
+}
+
+impl StreamValue {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    pub async fn get_entry_value(&self, entry_id: &str, key: &str) -> Option<&str> {
+        let entry = self.entries.get(entry_id)?;
+        entry.get(key).map(|x| x.as_str())
+    }
+
+    fn add_entry(
+        &mut self,
+        entry_id: String,
+        values: HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        match self.entries.entry(entry_id) {
+            hash_map::Entry::Occupied(_) => anyhow::bail!("An record with the same key exists."),
+            hash_map::Entry::Vacant(v) => {
+                v.insert(values);
+                Ok(())
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub enum EntryValue {
@@ -193,6 +222,13 @@ pub struct DatabaseEntry {
 impl DatabaseEntry {
     pub fn new(value: EntryValue, expires_on: Option<Expiry>) -> Self {
         DatabaseEntry { value, expires_on }
+    }
+
+    pub fn new_stream() -> Self {
+        DatabaseEntry {
+            value: EntryValue::Stream(StreamValue::new()),
+            expires_on: None,
+        }
     }
 
     pub fn get_expiry_time(&self) -> Option<SystemTime> {
@@ -250,7 +286,7 @@ impl Database {
         Ok(RespMessage::SimpleString(String::from("OK")))
     }
 
-    pub async fn get(&self, key: String) -> anyhow::Result<Option<EntryValue>> {
+    pub async fn get(&self, key: &str) -> anyhow::Result<Option<EntryValue>> {
         let r_store = self.entries.read().await;
         let key = &key.into();
 
@@ -267,6 +303,29 @@ impl Database {
         } else {
             Ok(None)
         }
+    }
+
+    pub async fn add_stream_entry(
+        &self,
+        key: &str,
+        entry_id: String,
+        values: HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        let mut store = self.entries.write().await;
+        let stream = store
+            .entry(key.into())
+            .and_modify(|x| {
+                if x.is_expired() || matches!(x.value, EntryValue::String(_)) {
+                    *x = DatabaseEntry::new_stream()
+                }
+            })
+            .or_insert_with(|| DatabaseEntry::new_stream());
+
+        let EntryValue::Stream(ref mut stream) = &mut stream.value else {
+            panic!("The entry is inserted in a way that its value must be stream");
+        };
+
+        stream.add_entry(entry_id, values)
     }
 
     pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {

@@ -14,6 +14,7 @@
         "REPLCONF",
         "REPLCONFIG",
         "replicaof",
-        "replid"
+        "replid",
+        "Xadd"
     ]
 }
