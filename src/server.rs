@@ -4,13 +4,13 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
     time::Duration,
 };
 
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::{
     commands::{Command, ReplCapability, ReplConfData, SetCommandOptions},
@@ -21,9 +21,9 @@ const DEFAULT_PORT: u16 = 6379;
 
 pub struct SlaveClientInfo {
     // should've used uuid
-    id: u32,
+    _id: u32,
     pub addr: SocketAddr,
-    pub capabilities: Vec<ReplCapability>,
+    pub _capabilities: Vec<ReplCapability>,
     pub client_tx: Arc<Mutex<mpsc::UnboundedSender<Command>>>,
     offset: usize,
 }
@@ -36,9 +36,9 @@ impl SlaveClientInfo {
         client_tx: mpsc::UnboundedSender<Command>,
     ) -> Self {
         Self {
-            id,
+            _id: id,
             addr,
-            capabilities,
+            _capabilities: capabilities,
             client_tx: Arc::new(Mutex::new(client_tx)),
             offset: 0,
         }
@@ -131,7 +131,7 @@ impl MasterServerInfo {
         Ok(n_received)
     }
 
-    pub async fn wait(&self, num_replicas: u32, timeout: u32) -> anyhow::Result<usize> {
+    pub async fn wait(&self, _num_replicas: u32, timeout: u32) -> anyhow::Result<usize> {
         let command = Command::ReplConf(vec![ReplConfData::GetAck]);
         let offset = {
             let mut repl_offset = self.repl_offset.write().await;
@@ -256,7 +256,7 @@ impl ServerConfig {
         self.port.unwrap_or(DEFAULT_PORT)
     }
 
-    pub fn is_master(&self) -> bool {
+    pub fn _is_master(&self) -> bool {
         match self.role {
             ServerRole::Master(_) => true,
             ServerRole::Slave(_) => false,

@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map, BTreeMap, BinaryHeap, HashMap},
+    collections::{hash_map, BTreeMap, HashMap},
     fmt,
     str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
@@ -203,7 +203,7 @@ impl StreamQueryResponse {
 pub struct StreamValue(HashMap<StreamEntryId, HashMap<String, String>>);
 
 impl StreamValue {
-    pub async fn get_entry_value(&self, entry_id: &StreamEntryId, key: &str) -> Option<&str> {
+    pub async fn _get_entry_value(&self, entry_id: &StreamEntryId, key: &str) -> Option<&str> {
         let entry = self.0.get(entry_id)?;
         entry.get(key).map(|x| x.as_str())
     }
@@ -230,7 +230,7 @@ impl StreamRecord {
         &self.value
     }
 
-    pub async fn add_entry(
+    pub async fn _add_entry(
         &mut self,
         entry_id: StreamEntryId,
         values: HashMap<String, String>,
