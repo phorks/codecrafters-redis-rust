@@ -229,6 +229,7 @@ pub enum Command {
     Xread(Vec<(String, XreadStreamEntryId)>, Option<XreadBlocking>),
     Incr(String),
     Multi,
+    Exec,
 }
 
 impl Command {
@@ -510,6 +511,16 @@ impl Command {
                 }
 
                 Ok(Command::Multi)
+            }
+            "exec" => {
+                if n_params != 0 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for EXEC (required 0, received {})",
+                        n_params
+                    )
+                }
+
+                Ok(Command::Exec)
             }
             _ => anyhow::bail!("Unknown command"),
         }

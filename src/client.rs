@@ -39,6 +39,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
     pub async fn run(mut self) -> anyhow::Result<()> {
         let mut n_commands = 0;
         let mut slave_state: Option<(u64, SlaveHandshakeState)> = None;
+        let mut transaction: Option<Vec<Command>> = None;
 
         while let Ok(command) = Command::from_buffer(&mut self.read).await {
             println!("Received command: {:?}", command);
@@ -268,8 +269,16 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     },
                 },
                 Command::Multi => {
+                    transaction = Some(vec![]);
                     self.write("OK".to_simple_string()).await?;
                 }
+                Command::Exec => match transaction {
+                    Some(transaction) => todo!(),
+                    None => {
+                        self.write("ERR EXEC without MULTI".to_simple_error())
+                            .await?;
+                    }
+                },
             };
             n_commands += 1;
         }

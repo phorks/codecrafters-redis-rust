@@ -23,6 +23,7 @@ where
 pub trait ToStringResp {
     fn to_simple_string(&self) -> RespMessage;
     fn to_bulk_string(&self) -> RespMessage;
+    fn to_simple_error(&self) -> RespMessage;
 }
 
 impl<S: ToString> ToStringResp for S {
@@ -32,5 +33,9 @@ impl<S: ToString> ToStringResp for S {
 
     fn to_bulk_string(&self) -> RespMessage {
         RespMessage::BulkString(self.to_string())
+    }
+
+    fn to_simple_error(&self) -> RespMessage {
+        RespMessage::SimpleError(self.to_string())
     }
 }
