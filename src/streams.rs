@@ -24,10 +24,7 @@ impl StreamEntryId {
                 millis: millis_str.parse()?,
                 seq_no: seq_no_str.parse()?,
             }),
-            None => Ok(Self {
-                millis: s.parse()?,
-                seq_no: default_seq_no,
-            }),
+            None => Ok(Self::new(s.parse()?, default_seq_no)),
         }
     }
 
@@ -40,7 +37,7 @@ impl StreamEntryId {
 
     pub fn parse_as_range_end(s: &str) -> anyhow::Result<Self> {
         match s {
-            "+" => Ok(Self::new(0, 0)),
+            "+" => Ok(Self::new(u64::MAX, u64::MAX)),
             _ => Self::parse_as_range_bound(s, u64::MAX),
         }
     }
