@@ -272,8 +272,12 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     transaction = Some(vec![]);
                     self.write("OK".to_simple_string()).await?;
                 }
-                Command::Exec => match transaction {
-                    Some(transaction) => todo!(),
+                Command::Exec => match &transaction {
+                    Some(transaction) => {
+                        if transaction.len() == 0 {
+                            self.write(RespMessage::Array(vec![])).await?;
+                        }
+                    }
                     None => {
                         self.write("ERR EXEC without MULTI".to_simple_error())
                             .await?;
