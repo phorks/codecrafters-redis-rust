@@ -322,9 +322,14 @@ impl Database {
             }
         }
 
+        let value = match value.parse::<u32>() {
+            Ok(i) => StringValue::Int32(i),
+            Err(_) => StringValue::Str((value).into()),
+        };
+
         self.entries.write().await.insert(
             key.clone().into(),
-            DatabaseEntry::new(EntryRecord::String((&value).into()), expires_on),
+            DatabaseEntry::new(EntryRecord::String(value), expires_on),
         );
 
         Ok(RespMessage::SimpleString(String::from("OK")))
