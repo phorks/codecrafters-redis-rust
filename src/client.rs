@@ -267,6 +267,9 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         Err(e) => return Err(e),
                     },
                 },
+                Command::Multi => {
+                    self.write("OK".to_simple_string()).await?;
+                }
             };
             n_commands += 1;
         }

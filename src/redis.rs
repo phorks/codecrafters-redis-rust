@@ -75,21 +75,17 @@ async fn read_numeric_length<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Re
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum StringValue {
-    Str(Vec<u8>),
-    Int8(u8),
-    Int16(u16),
-    Int32(u32),
+    String(Vec<u8>),
+    Integer(u32),
 }
 
 impl StringValue {
     pub fn new_increased(&self) -> anyhow::Result<StringValue> {
         let new = match self {
-            StringValue::Str(_) => anyhow::bail!(TypeError::NotIntegerOrOutOfRange),
-            StringValue::Int8(i) => StringValue::Int8(i + 1),
-            StringValue::Int16(i) => StringValue::Int16(i + 1),
-            StringValue::Int32(i) => StringValue::Int32(i + 1),
+            StringValue::String(_) => anyhow::bail!(TypeError::NotIntegerOrOutOfRange),
+            StringValue::Integer(i) => StringValue::Integer(i + 1),
         };
 
         Ok(new)
@@ -97,10 +93,8 @@ impl StringValue {
 
     pub fn to_i64(&self) -> anyhow::Result<i64> {
         let i = match self {
-            StringValue::Str(_) => anyhow::bail!(TypeError::NotIntegerOrOutOfRange),
-            StringValue::Int8(i) => *i as i64,
-            StringValue::Int16(i) => *i as i64,
-            StringValue::Int32(i) => *i as i64,
+            StringValue::String(_) => anyhow::bail!(TypeError::NotIntegerOrOutOfRange),
+            StringValue::Integer(i) => *i as i64,
         };
 
         Ok(i)
@@ -109,17 +103,15 @@ impl StringValue {
 
 impl<T: AsRef<str>> From<T> for StringValue {
     fn from(value: T) -> Self {
-        StringValue::Str(value.as_ref().chars().map(|x| x as u8).collect())
+        StringValue::String(value.as_ref().chars().map(|x| x as u8).collect())
     }
 }
 
 impl ToString for StringValue {
     fn to_string(&self) -> String {
         match self {
-            StringValue::Str(vec) => vec.iter().map(|i| *i as char).collect::<String>(),
-            StringValue::Int8(i) => i.to_string(),
-            StringValue::Int16(i) => i.to_string(),
-            StringValue::Int32(i) => i.to_string(),
+            StringValue::String(vec) => vec.iter().map(|i| *i as char).collect::<String>(),
+            StringValue::Integer(i) => i.to_string(),
         }
     }
 }
@@ -129,11 +121,11 @@ async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Str
         LengthValue::Length(length) => {
             let mut bytes = vec![0u8; length as usize];
             buf.read_exact(&mut bytes).await?;
-            Ok(StringValue::Str(bytes))
+            Ok(StringValue::String(bytes))
         }
-        LengthValue::IntegerAsString8 => Ok(StringValue::Int8(buf.read_u8().await?)),
-        LengthValue::IntegerAsString16 => Ok(StringValue::Int16(buf.read_u16_le().await?)),
-        LengthValue::IntegerAsString32 => Ok(StringValue::Int32(buf.read_u32_le().await?)),
+        LengthValue::IntegerAsString8 => Ok(StringValue::Integer(buf.read_u8().await? as u32)),
+        LengthValue::IntegerAsString16 => Ok(StringValue::Integer(buf.read_u16_le().await? as u32)),
+        LengthValue::IntegerAsString32 => Ok(StringValue::Integer(buf.read_u32_le().await?)),
         LengthValue::CompressedString => {
             let clen = read_numeric_length(buf).await?;
             let _ulen = read_numeric_length(buf).await?;
@@ -141,7 +133,7 @@ async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<Str
             let mut bytes = vec![0u8; clen as usize];
             buf.read_exact(&mut bytes).await?;
             // TODO: perform LZF decompression
-            Ok(StringValue::Str(bytes))
+            Ok(StringValue::String(bytes))
         }
     }
 }
@@ -309,7 +301,7 @@ impl Database {
     pub async fn set(
         &self,
         key: String,
-        value: String,
+        value: StringValue,
         options: SetCommandOptions,
     ) -> anyhow::Result<RespMessage> {
         let mut expires_on = None;
@@ -321,11 +313,6 @@ impl Database {
                 anyhow::bail!("Invalid px");
             }
         }
-
-        let value = match value.parse::<u32>() {
-            Ok(i) => StringValue::Int32(i),
-            Err(_) => StringValue::Str((value).into()),
-        };
 
         self.entries.write().await.insert(
             key.clone().into(),
@@ -513,7 +500,7 @@ impl Database {
         let mut store = self.entries.write().await;
 
         let entry = store.entry(key.into()).or_insert_with(|| {
-            DatabaseEntry::new(EntryRecord::String(StringValue::Int32(0)), None)
+            DatabaseEntry::new(EntryRecord::String(StringValue::Integer(0)), None)
         });
 
         let new = match &entry.record {

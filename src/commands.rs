@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, Lines};
 
 use crate::{
     info::{InfoSection, InfoSectionKind},
+    redis::StringValue,
     resp::RespMessage,
     server::ServerConfig,
     streams::{StreamEntryId, XaddStreamEntryId, XreadStreamEntryId},
@@ -214,7 +215,7 @@ pub enum XreadBlocking {
 pub enum Command {
     Ping,
     Echo(String),
-    Set(String, String, SetCommandOptions),
+    Set(String, StringValue, SetCommandOptions),
     Get(String),
     Config(String, Vec<String>),
     Keys(String),
@@ -227,6 +228,7 @@ pub enum Command {
     Xrange(String, StreamEntryId, StreamEntryId),
     Xread(Vec<(String, XreadStreamEntryId)>, Option<XreadBlocking>),
     Incr(String),
+    Multi,
 }
 
 impl Command {
@@ -297,6 +299,11 @@ impl Command {
 
                 let key = read_param(&mut lines).await?;
                 let value = read_param(&mut lines).await?;
+
+                let value = match value.parse::<u32>() {
+                    Ok(i) => StringValue::Integer(i),
+                    Err(_) => StringValue::String((value).into()),
+                };
 
                 let rest_params = read_rest_params(&mut lines, n_params - 2).await?;
                 let options = SetCommandOptions::from_rest_params(rest_params)?;
@@ -494,6 +501,16 @@ impl Command {
 
                 Ok(Command::Incr(read_param(&mut lines).await?))
             }
+            "multi" => {
+                if n_params != 0 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for MULTI (required 0, received {})",
+                        n_params
+                    )
+                }
+
+                Ok(Command::Multi)
+            }
             _ => anyhow::bail!("Unknown command"),
         }
     }
@@ -539,14 +556,14 @@ impl Command {
                 let mut lines = vec![
                     RespMessage::bulk_from_str("SET"),
                     RespMessage::BulkString(key.clone()),
-                    RespMessage::BulkString(value.clone()),
+                    RespMessage::BulkString(value.to_string()),
                 ];
 
                 options.append_to_vec(&mut lines);
 
                 lines
             }
-            _ => anyhow::bail!("Send command is not supported"),
+            _ => anyhow::bail!("Other commands are not supported"),
         };
 
         Ok(RespMessage::Array(lines))

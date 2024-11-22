@@ -12,7 +12,10 @@ use std::{
 
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 
-use crate::commands::{Command, ReplCapability, ReplConfData, SetCommandOptions};
+use crate::{
+    commands::{Command, ReplCapability, ReplConfData, SetCommandOptions},
+    redis::StringValue,
+};
 
 const DEFAULT_PORT: u16 = 6379;
 
@@ -105,10 +108,10 @@ impl MasterServerInfo {
     pub async fn propagate_set(
         &self,
         key: &str,
-        value: &str,
+        value: &StringValue,
         options: SetCommandOptions,
     ) -> anyhow::Result<usize> {
-        let command = Command::Set(String::from(key), String::from(value), options.clone());
+        let command = Command::Set(String::from(key), value.clone(), options.clone());
 
         {
             *self.repl_offset.write().await += command.to_resp()?.count_in_bytes();
