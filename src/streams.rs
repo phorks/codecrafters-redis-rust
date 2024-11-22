@@ -228,6 +228,7 @@ impl StreamRecord {
             .generate_entry_id(entry_id)
             .map_err(|e| anyhow::anyhow!(e))?;
 
+        eprintln!("{:?}", entry_id);
         self.add_entry_unchecked(entry_id.clone(), values).await?;
         Ok(entry_id)
     }

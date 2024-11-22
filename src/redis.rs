@@ -330,7 +330,7 @@ impl Database {
     ) -> anyhow::Result<StreamEntryId> {
         let mut store = self.entries.write().await;
         let stream = store
-            .entry(key.clone().into())
+            .entry(key.into())
             .and_modify(|x| {
                 if x.is_expired() || matches!(x.record, EntryRecord::String(_)) {
                     *x = DatabaseEntry::new_stream(String::from(key))
@@ -342,6 +342,7 @@ impl Database {
             panic!("The entry is inserted in a way that its value must be stream");
         };
 
+        eprintln!("{:?}", entry_id);
         Ok(stream.xadd(entry_id, values).await?)
     }
 
