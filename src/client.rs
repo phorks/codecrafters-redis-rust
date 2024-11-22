@@ -376,7 +376,12 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
     }
 
     async fn write(&mut self, message: RespMessage) -> anyhow::Result<()> {
-        message.write(&mut self.write).await
+        match &mut self.queued_responses {
+            Some(queue) => queue.push(message),
+            None => message.write(&mut self.write).await?,
+        };
+
+        Ok(())
     }
 }
 
