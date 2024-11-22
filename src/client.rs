@@ -78,6 +78,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                 }
                 Command::Discard => {
                     self.queued_commands = None;
+                    self.write("OK".to_simple_string()).await?;
                 }
                 _ => {
                     queue.push(command);
