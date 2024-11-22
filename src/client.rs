@@ -227,7 +227,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 
                     self.write(entries.to_resp()).await?;
                 }
-                Command::Xread(stream_starts) => {
+                Command::Xread(stream_starts, blocking) => {
                     let res = self.store.get_bulk_stream_entries(stream_starts).await?;
                     let resp = res
                         .iter()

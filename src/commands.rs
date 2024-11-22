@@ -205,6 +205,12 @@ impl<T: AsRef<str>> TryFrom<(&T, &T)> for ReplConfData {
 }
 
 #[derive(Debug, Clone)]
+pub enum XreadBlocking {
+    Block(u64),
+    BlockIndefinitely,
+}
+
+#[derive(Debug, Clone)]
 pub enum Command {
     Ping,
     Echo(String),
@@ -219,7 +225,7 @@ pub enum Command {
     Type(String),
     Xadd(String, XaddStreamEntryId, HashMap<String, String>),
     Xrange(String, StreamEntryId, StreamEntryId),
-    Xread(Vec<(String, StreamEntryId)>),
+    Xread(Vec<(String, StreamEntryId)>, Option<XreadBlocking>),
 }
 
 impl Command {
@@ -436,8 +442,23 @@ impl Command {
             }
             "xread" => {
                 let mut n_read = 0;
+                let mut blocking = None;
                 loop {
                     let param = read_param(&mut lines).await?;
+
+                    match param.to_ascii_lowercase().as_str() {
+                        "block" => {
+                            let millis = read_param(&mut lines).await?.parse()?;
+                            blocking = Some(match millis {
+                                0 => XreadBlocking::BlockIndefinitely,
+                                _ => XreadBlocking::Block(millis),
+                            });
+
+                            n_read += 1;
+                        }
+                        _ => {}
+                    }
+
                     n_read += 1;
                     if param == "streams" {
                         break;
@@ -460,7 +481,7 @@ impl Command {
                     stream_starts.push((rest[i].clone(), rest[mid + i].parse()?))
                 }
 
-                Ok(Command::Xread(stream_starts))
+                Ok(Command::Xread(stream_starts, blocking))
             }
             _ => anyhow::bail!("Unknown command"),
         }
