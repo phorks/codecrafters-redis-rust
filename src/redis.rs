@@ -394,6 +394,7 @@ impl Database {
         }
         drop(store);
 
+        println!("Is this called?");
         if n_ready != stream_starts.len() {
             let n = stream_starts.len();
             let fut = async move {
