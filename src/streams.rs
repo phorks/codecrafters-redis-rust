@@ -258,7 +258,7 @@ impl StreamRecord {
         entry_id: StreamEntryId,
         tx: mpsc::Sender<(String, StreamQueryResponse)>,
     ) -> anyhow::Result<()> {
-        if entry_id <= self.top_entry_id {
+        if entry_id < self.top_entry_id {
             anyhow::bail!("The data is available. There is no need for subscriptions.")
         }
 
