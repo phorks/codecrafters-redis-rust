@@ -14,7 +14,7 @@ pub struct StreamEntryId {
 }
 
 impl StreamEntryId {
-    pub fn new(millis: u64, seq_no: u64) -> Self {
+    fn new(millis: u64, seq_no: u64) -> Self {
         Self { millis, seq_no }
     }
 
@@ -32,11 +32,17 @@ impl StreamEntryId {
     }
 
     pub fn parse_as_range_start(s: &str) -> anyhow::Result<Self> {
-        Self::parse_as_range_bound(s, 0)
+        match s {
+            "-" => Ok(Self::new(0, 0)),
+            _ => Self::parse_as_range_bound(s, 0),
+        }
     }
 
     pub fn parse_as_range_end(s: &str) -> anyhow::Result<Self> {
-        Self::parse_as_range_bound(s, u64::MAX)
+        match s {
+            "+" => Ok(Self::new(0, 0)),
+            _ => Self::parse_as_range_bound(s, u64::MAX),
+        }
     }
 
     pub fn is_min(&self) -> bool {
