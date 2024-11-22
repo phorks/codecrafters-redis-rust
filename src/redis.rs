@@ -282,7 +282,7 @@ impl TypeError {
 
 impl std::fmt::Display for TypeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Value is not an integer or is out of range.");
+        write!(f, "Value is not an integer or is out of range.")?;
         Ok(())
     }
 }

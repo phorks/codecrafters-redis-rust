@@ -230,6 +230,7 @@ pub enum Command {
     Incr(String),
     Multi,
     Exec,
+    Discard,
 }
 
 impl Command {
@@ -521,6 +522,16 @@ impl Command {
                 }
 
                 Ok(Command::Exec)
+            }
+            "discard" => {
+                if n_params != 0 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for DISCARD (required 0, received {})",
+                        n_params
+                    )
+                }
+
+                Ok(Command::Discard)
             }
             _ => anyhow::bail!("Unknown command"),
         }

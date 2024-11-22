@@ -64,6 +64,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
         if let Some(queue) = self.queued_commands.as_mut() {
             match command {
                 Command::Exec => {
+                    println!("Correct EXEC");
                     let queue = self.queued_commands.take().unwrap();
                     self.queued_responses = Some(vec![]);
                     for command in queue {
@@ -74,6 +75,9 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     // use a stack for responses?
                     let responses = self.queued_responses.take().unwrap();
                     self.write(RespMessage::Array(responses)).await?;
+                }
+                Command::Discard => {
+                    self.queued_commands = None;
                 }
                 _ => {
                     queue.push(command);
@@ -315,18 +319,25 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                 self.queued_commands = Some(vec![]);
                 self.write("OK".to_simple_string()).await?;
             }
-            Command::Exec => match &self.queued_commands {
-                Some(queue) => {
-                    if queue.len() == 0 {
-                        self.write(RespMessage::Array(vec![])).await?;
-                    }
-                    self.queued_commands = None
-                }
-                None => {
-                    self.write("ERR EXEC without MULTI".to_simple_error())
-                        .await?;
-                }
-            },
+            Command::Exec => {
+                // { match &self.queued_commands {
+                // Some(queue) => {
+                //     if queue.len() == 0 {
+                //         self.write(RespMessage::Array(vec![])).await?;
+                //     }
+                //     self.queued_commands = None
+                // }
+                // None => {
+                println!("Bad EXEC");
+                self.write("ERR EXEC without MULTI".to_simple_error())
+                    .await?;
+                // }
+                // }
+            }
+            Command::Discard => {
+                self.write("ERR DISCARD without MULTI".to_simple_error())
+                    .await?;
+            }
         };
         self.n_commands += 1;
         Ok(())
