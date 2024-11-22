@@ -5,6 +5,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use tokio::sync::mpsc;
+
 use crate::{
     resp::RespMessage,
     resp_ext::{ToMapRespArray, ToStringResp},
@@ -155,6 +157,10 @@ impl FromStr for XaddStreamEntryId {
 pub struct StreamQueryResponse(BTreeMap<StreamEntryId, HashMap<String, String>>);
 
 impl StreamQueryResponse {
+    pub fn empty() -> Self {
+        Self(BTreeMap::new())
+    }
+
     pub fn to_resp(&self) -> RespMessage {
         self.0
             .iter()
@@ -168,36 +174,52 @@ impl StreamQueryResponse {
             })
             .to_map_resp_array()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.len() == 0
+    }
 }
 
 #[derive(Clone)]
-pub struct StreamValue {
-    entries: HashMap<StreamEntryId, HashMap<String, String>>,
-    top_entry_id: StreamEntryId,
-}
+pub struct StreamValue(HashMap<StreamEntryId, HashMap<String, String>>);
 
 impl StreamValue {
-    pub fn new() -> Self {
+    pub async fn get_entry_value(&self, entry_id: &StreamEntryId, key: &str) -> Option<&str> {
+        let entry = self.0.get(entry_id)?;
+        entry.get(key).map(|x| x.as_str())
+    }
+}
+
+pub struct StreamRecord {
+    id: String,
+    value: StreamValue,
+    top_entry_id: StreamEntryId,
+    listeners: Vec<(StreamEntryId, mpsc::Sender<(String, StreamQueryResponse)>)>,
+}
+
+impl StreamRecord {
+    pub fn new(id: String) -> Self {
         Self {
-            entries: HashMap::new(),
+            id,
+            value: StreamValue(HashMap::new()),
             top_entry_id: StreamEntryId::default(),
+            listeners: vec![],
         }
     }
 
-    pub async fn get_entry_value(&self, entry_id: &StreamEntryId, key: &str) -> Option<&str> {
-        let entry = self.entries.get(entry_id)?;
-        entry.get(key).map(|x| x.as_str())
+    pub fn value(&self) -> &StreamValue {
+        &self.value
     }
 
-    pub fn add_entry(
+    pub async fn add_entry(
         &mut self,
         entry_id: StreamEntryId,
         values: HashMap<String, String>,
     ) -> anyhow::Result<()> {
-        self.add_entry_unchecked(entry_id, values)
+        self.add_entry_unchecked(entry_id, values).await
     }
 
-    pub fn xadd(
+    pub async fn xadd(
         &mut self,
         entry_id: XaddStreamEntryId,
         values: HashMap<String, String>,
@@ -206,7 +228,7 @@ impl StreamValue {
             .generate_entry_id(entry_id)
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        self.add_entry_unchecked(entry_id.clone(), values)?;
+        self.add_entry_unchecked(entry_id.clone(), values).await?;
         Ok(entry_id)
     }
 
@@ -220,7 +242,7 @@ impl StreamValue {
         // Redis does it in O(m), while keeping entry insertion in O(1) by leveraging Radix tries
         let mut map = BTreeMap::new();
 
-        for (key, value) in &self.entries {
+        for (key, value) in &self.value.0 {
             if key >= start && key <= end {
                 map.insert(key.clone(), value.clone());
             }
@@ -229,19 +251,49 @@ impl StreamValue {
         StreamQueryResponse(map)
     }
 
-    fn add_entry_unchecked(
+    pub fn subscribe(
+        &mut self,
+        entry_id: StreamEntryId,
+        tx: mpsc::Sender<(String, StreamQueryResponse)>,
+    ) -> anyhow::Result<()> {
+        if entry_id <= self.top_entry_id {
+            anyhow::bail!("The data is available. There is no need for subscriptions.")
+        }
+
+        self.listeners.push((entry_id, tx));
+        Ok(())
+    }
+
+    async fn add_entry_unchecked(
         &mut self,
         entry_id: StreamEntryId,
         values: HashMap<String, String>,
     ) -> anyhow::Result<()> {
-        match self.entries.entry(entry_id.clone()) {
+        match self.value.0.entry(entry_id.clone()) {
             hash_map::Entry::Occupied(_) => anyhow::bail!("A record with the same key exists."),
             hash_map::Entry::Vacant(v) => {
-                v.insert(values);
+                v.insert(values.clone());
             }
         }
 
-        self.top_entry_id = entry_id;
+        self.top_entry_id = entry_id.clone();
+
+        let old_listeners = std::mem::replace(&mut self.listeners, vec![]);
+        let mut new_listeners = Vec::with_capacity(self.listeners.len());
+
+        for (waiting_for, tx) in old_listeners.into_iter() {
+            if entry_id >= waiting_for {
+                tx.send((
+                    self.id.clone(),
+                    StreamQueryResponse([(entry_id.clone(), values.clone())].into()),
+                ))
+                .await;
+            } else {
+                new_listeners.push((waiting_for, tx));
+            }
+        }
+
+        self.listeners = new_listeners;
 
         Ok(())
     }

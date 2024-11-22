@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     commands::{Command, ReplConfData},
-    redis::{Database, EntryValue, EMPTY_RDB},
+    redis::{Database, RecordValue, EMPTY_RDB},
     resp::RespMessage,
     resp_ext::{ToMapRespArray, ToStringResp},
     server::{ServerConfig, ServerRole},
@@ -197,8 +197,8 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                 }
                 Command::Type(key) => {
                     let typ = match self.store.get(&key).await? {
-                        Some(EntryValue::String(_)) => "string",
-                        Some(EntryValue::Stream(_)) => "stream",
+                        Some(RecordValue::String(_)) => "string",
+                        Some(RecordValue::Stream(_)) => "stream",
                         None => "none",
                     };
 
@@ -227,14 +227,35 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 
                     self.write(entries.to_resp()).await?;
                 }
-                Command::Xread(stream_starts, blocking) => {
-                    let res = self.store.get_bulk_stream_entries(stream_starts).await?;
-                    let resp = res
-                        .iter()
-                        .map(|x| (x.0.to_bulk_string(), x.1.to_resp()))
-                        .to_map_resp_array();
-                    self.write(resp).await?;
-                }
+                Command::Xread(stream_starts, blocking) => match blocking {
+                    Some(block) => {
+                        let res = self
+                            .store
+                            .get_bulk_stream_entries_blocking(stream_starts, block)
+                            .await?;
+
+                        match res {
+                            Some(res) => {
+                                let resp = res
+                                    .iter()
+                                    .map(|x| (x.0.to_bulk_string(), x.1.to_resp()))
+                                    .to_map_resp_array();
+                                self.write(resp).await?;
+                            }
+                            None => {
+                                self.write(RespMessage::Null).await?;
+                            }
+                        }
+                    }
+                    None => {
+                        let res = self.store.get_bulk_stream_entries(stream_starts).await?;
+                        let resp = res
+                            .iter()
+                            .map(|x| (x.0.to_bulk_string(), x.1.to_resp()))
+                            .to_map_resp_array();
+                        self.write(resp).await?;
+                    }
+                },
             };
             n_commands += 1;
         }

@@ -15,14 +15,15 @@ pub const EMPTY_RDB: [u8; 88] = [
 
 use tokio::{
     io::AsyncReadExt,
-    sync::{RwLock, RwLockWriteGuard},
+    sync::{mpsc, RwLock, RwLockWriteGuard},
+    time::timeout,
 };
 
 use crate::{
-    commands::SetCommandOptions,
+    commands::{SetCommandOptions, XreadBlocking},
     io_helper::skip_sequence,
     resp::RespMessage,
-    streams::{StreamEntryId, StreamQueryResponse, StreamValue, XaddStreamEntryId},
+    streams::{StreamEntryId, StreamQueryResponse, StreamRecord, StreamValue, XaddStreamEntryId},
 };
 
 #[derive(Debug)]
@@ -176,34 +177,51 @@ pub enum Expiry {
 }
 
 #[derive(Clone)]
-pub enum EntryValue {
+pub enum RecordValue {
     String(StringValue),
     Stream(StreamValue),
 }
 
-impl From<Option<EntryValue>> for RespMessage {
-    fn from(value: Option<EntryValue>) -> Self {
+enum EntryRecord {
+    String(StringValue),
+    Stream(StreamRecord),
+}
+
+impl EntryRecord {
+    fn value(&self) -> RecordValue {
+        match self {
+            EntryRecord::String(value) => RecordValue::String(value.clone()),
+            EntryRecord::Stream(stream) => RecordValue::Stream(stream.value().clone()),
+        }
+    }
+}
+
+impl From<Option<RecordValue>> for RespMessage {
+    fn from(value: Option<RecordValue>) -> Self {
         match value {
-            Some(EntryValue::String(s)) => RespMessage::BulkString(s.to_string()),
-            Some(EntryValue::Stream(_)) => todo!(),
+            Some(RecordValue::String(s)) => RespMessage::BulkString(s.to_string()),
+            Some(RecordValue::Stream(_)) => todo!(),
             None => RespMessage::Null,
         }
     }
 }
 
 pub struct DatabaseEntry {
-    pub value: EntryValue,
+    pub record: EntryRecord,
     pub expires_on: Option<Expiry>,
 }
 
 impl DatabaseEntry {
-    pub fn new(value: EntryValue, expires_on: Option<Expiry>) -> Self {
-        DatabaseEntry { value, expires_on }
+    pub fn new(value: EntryRecord, expires_on: Option<Expiry>) -> Self {
+        DatabaseEntry {
+            record: value,
+            expires_on,
+        }
     }
 
-    pub fn new_stream() -> Self {
+    pub fn new_stream(key: String) -> Self {
         DatabaseEntry {
-            value: EntryValue::Stream(StreamValue::new()),
+            record: EntryRecord::Stream(StreamRecord::new(key)),
             expires_on: None,
         }
     }
@@ -257,13 +275,13 @@ impl Database {
 
         self.entries.write().await.insert(
             key.clone().into(),
-            DatabaseEntry::new(EntryValue::String((&value).into()), expires_on),
+            DatabaseEntry::new(EntryRecord::String((&value).into()), expires_on),
         );
 
         Ok(RespMessage::SimpleString(String::from("OK")))
     }
 
-    pub async fn get(&self, key: &str) -> anyhow::Result<Option<EntryValue>> {
+    pub async fn get(&self, key: &str) -> anyhow::Result<Option<RecordValue>> {
         let r_store = self.entries.read().await;
         let key = &key.into();
 
@@ -276,28 +294,28 @@ impl Database {
                 return Ok(None);
             }
 
-            Ok(Some(entry.value.clone()))
+            Ok(Some(entry.record.value()))
         } else {
             Ok(None)
         }
     }
 
-    async fn with_stream<T, F: FnOnce(&mut StreamValue) -> anyhow::Result<T>>(
+    async fn with_stream<T, F: FnOnce(&mut StreamRecord) -> anyhow::Result<T>>(
         &self,
         key: &str,
         f: F,
     ) -> anyhow::Result<T> {
         let mut store = self.entries.write().await;
         let stream = store
-            .entry(key.into())
+            .entry(key.clone().into())
             .and_modify(|x| {
-                if x.is_expired() || matches!(x.value, EntryValue::String(_)) {
-                    *x = DatabaseEntry::new_stream()
+                if x.is_expired() || matches!(x.record, EntryRecord::String(_)) {
+                    *x = DatabaseEntry::new_stream(String::from(key))
                 }
             })
-            .or_insert_with(|| DatabaseEntry::new_stream());
+            .or_insert_with(|| DatabaseEntry::new_stream(String::from(key)));
 
-        let EntryValue::Stream(ref mut stream) = &mut stream.value else {
+        let EntryRecord::Stream(ref mut stream) = &mut stream.record else {
             panic!("The entry is inserted in a way that its value must be stream");
         };
 
@@ -310,8 +328,21 @@ impl Database {
         entry_id: XaddStreamEntryId,
         values: HashMap<String, String>,
     ) -> anyhow::Result<StreamEntryId> {
-        self.with_stream(key, move |stream| stream.xadd(entry_id, values))
-            .await
+        let mut store = self.entries.write().await;
+        let stream = store
+            .entry(key.clone().into())
+            .and_modify(|x| {
+                if x.is_expired() || matches!(x.record, EntryRecord::String(_)) {
+                    *x = DatabaseEntry::new_stream(String::from(key))
+                }
+            })
+            .or_insert_with(|| DatabaseEntry::new_stream(String::from(key)));
+
+        let EntryRecord::Stream(ref mut stream) = &mut stream.record else {
+            panic!("The entry is inserted in a way that its value must be stream");
+        };
+
+        Ok(stream.xadd(entry_id, values).await?)
     }
 
     pub async fn get_stream_entries_in_range(
@@ -320,13 +351,17 @@ impl Database {
         start: StreamEntryId,
         end: StreamEntryId,
     ) -> anyhow::Result<StreamQueryResponse> {
-        // FIXME: with_stream will unnecessarily create the stream if it doesn't exists or
-        // replace it if the key is a string value. It makes sense for add but not for queries.
-        // We also don't need to acquire WRITE lock to respond to the query
-        self.with_stream(key, move |stream| {
-            Ok(stream.get_entries_in_range(&start, &end))
-        })
-        .await
+        let store = self.entries.read().await;
+
+        let Some(stream) = store.get(&key.clone().into()) else {
+            return Ok(StreamQueryResponse::empty());
+        };
+
+        let EntryRecord::Stream(ref stream) = &stream.record else {
+            anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
+        };
+
+        Ok(stream.get_entries_in_range(&start, &end))
     }
 
     pub async fn get_bulk_stream_entries(
@@ -339,7 +374,7 @@ impl Database {
             let Some(stream) = store.get(&key.clone().into()) else {
                 continue;
             };
-            let EntryValue::Stream(ref stream) = &stream.value else {
+            let EntryRecord::Stream(ref stream) = &stream.record else {
                 anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
             };
 
@@ -350,6 +385,79 @@ impl Database {
         }
 
         Ok(res)
+    }
+
+    pub async fn get_bulk_stream_entries_blocking(
+        &self,
+        stream_starts: Vec<(String, StreamEntryId)>,
+        block: XreadBlocking,
+    ) -> anyhow::Result<Option<Vec<(String, StreamQueryResponse)>>> {
+        let mut responses = HashMap::new();
+        let mut store = self.entries.write().await;
+        let (tx, mut rx) = mpsc::channel(stream_starts.len());
+        let mut n_ready = 0;
+        for (key, start) in stream_starts.iter() {
+            let Some(stream) = store.get_mut(&key.clone().into()) else {
+                continue;
+            };
+            let EntryRecord::Stream(ref mut stream) = &mut stream.record else {
+                anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
+            };
+
+            let entries = stream.get_entries_in_range(&start, &StreamEntryId::MAX);
+
+            if entries.is_empty() {
+                responses.insert(key.clone(), None);
+                stream.subscribe(start.clone(), tx.clone());
+            } else {
+                responses.insert(key.clone(), Some(entries));
+                n_ready += 1;
+            }
+        }
+        drop(store);
+
+        if n_ready != stream_starts.len() {
+            let n = stream_starts.len();
+            let fut = async move {
+                loop {
+                    let Some((key, entries)) = rx.recv().await else {
+                        break;
+                    };
+
+                    n_ready += 1;
+                    responses.insert(key, Some(entries));
+
+                    if n_ready == n {
+                        break;
+                    }
+                }
+
+                (n_ready, responses)
+            };
+
+            (n_ready, responses) = match block {
+                XreadBlocking::Block(millis) => {
+                    match timeout(Duration::from_millis(millis), fut).await {
+                        Ok(x) => x,
+                        Err(_) => return Ok(None),
+                    }
+                }
+                XreadBlocking::BlockIndefinitely => fut.await,
+            };
+        }
+
+        if n_ready != stream_starts.len() {
+            // FIXME: Probably unregister all channels registered to streams
+            Ok(None)
+        } else {
+            let mut res = vec![];
+            for (key, _) in &stream_starts {
+                let entries = responses.remove(key).unwrap().unwrap();
+                res.push((key.clone(), entries));
+            }
+
+            Ok(Some(res))
+        }
     }
 
     pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {
@@ -432,7 +540,7 @@ impl Instance {
                             key,
                             DatabaseEntry {
                                 expires_on,
-                                value: EntryValue::String(value),
+                                record: EntryRecord::String(value),
                             },
                         );
                     }
