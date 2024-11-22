@@ -273,10 +273,11 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                     self.write("OK".to_simple_string()).await?;
                 }
                 Command::Exec => match &transaction {
-                    Some(transaction) => {
-                        if transaction.len() == 0 {
+                    Some(queue) => {
+                        if queue.len() == 0 {
                             self.write(RespMessage::Array(vec![])).await?;
                         }
+                        transaction = None
                     }
                     None => {
                         self.write("ERR EXEC without MULTI".to_simple_error())
