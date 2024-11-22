@@ -339,16 +339,16 @@ impl Database {
             anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
         };
 
-        Ok(stream.get_entries_in_range(&start, &end))
+        Ok(stream.get_entries_in_range(&start, &end, false))
     }
 
     pub async fn get_bulk_stream_entries(
         &self,
-        stream_starts: Vec<(String, StreamEntryId)>,
+        stream_afters: Vec<(String, StreamEntryId)>,
     ) -> anyhow::Result<Vec<(String, StreamQueryResponse)>> {
         let mut res = vec![];
         let store = self.entries.read().await;
-        for (key, start) in stream_starts.into_iter() {
+        for (key, start) in stream_afters.into_iter() {
             let Some(stream) = store.get(&key.clone().into()) else {
                 continue;
             };
@@ -358,7 +358,7 @@ impl Database {
 
             res.push((
                 key,
-                stream.get_entries_in_range(&start, &StreamEntryId::MAX),
+                stream.get_entries_in_range(&start, &StreamEntryId::MAX, true),
             ));
         }
 
@@ -367,14 +367,14 @@ impl Database {
 
     pub async fn get_bulk_stream_entries_blocking(
         &self,
-        stream_starts: Vec<(String, StreamEntryId)>,
+        stream_afters: Vec<(String, StreamEntryId)>,
         block: XreadBlocking,
     ) -> anyhow::Result<Option<Vec<(String, StreamQueryResponse)>>> {
         let mut responses = HashMap::new();
         let mut store = self.entries.write().await;
-        let (tx, mut rx) = mpsc::channel(stream_starts.len());
+        let (tx, mut rx) = mpsc::channel(stream_afters.len());
         let mut n_ready = 0;
-        for (key, start) in stream_starts.iter() {
+        for (key, start) in stream_afters.iter() {
             let Some(stream) = store.get_mut(&key.clone().into()) else {
                 continue;
             };
@@ -382,7 +382,7 @@ impl Database {
                 anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
             };
 
-            let entries = stream.get_entries_in_range(&start, &StreamEntryId::MAX);
+            let entries = stream.get_entries_in_range(&start, &StreamEntryId::MAX, true);
 
             if entries.is_empty() {
                 responses.insert(key.clone(), None);
@@ -395,8 +395,8 @@ impl Database {
         drop(store);
 
         println!("Is this called?");
-        if n_ready != stream_starts.len() {
-            let n = stream_starts.len();
+        if n_ready != stream_afters.len() {
+            let n = stream_afters.len();
             let fut = async move {
                 loop {
                     let Some((key, entries)) = rx.recv().await else {
@@ -427,12 +427,12 @@ impl Database {
             };
         }
 
-        if n_ready != stream_starts.len() {
+        if n_ready != stream_afters.len() {
             // FIXME: Probably unregister all channels registered to streams
             Ok(None)
         } else {
             let mut res = vec![];
-            for (key, _) in &stream_starts {
+            for (key, _) in &stream_afters {
                 let entries = responses.remove(key).unwrap().unwrap();
                 res.push((key.clone(), entries));
             }

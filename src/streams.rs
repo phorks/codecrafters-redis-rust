@@ -237,6 +237,7 @@ impl StreamRecord {
         &self,
         start: &StreamEntryId,
         end: &StreamEntryId,
+        start_exclusive: bool,
     ) -> StreamQueryResponse {
         // FIXME this is approach is inefficient. It is of O(n + mlogm) where n is
         // the total number of entries in the stream and m is the number of entries in the given range.
@@ -244,7 +245,7 @@ impl StreamRecord {
         let mut map = BTreeMap::new();
 
         for (key, value) in &self.value.0 {
-            if key >= start && key <= end {
+            if (key >= start && (!start_exclusive || key != start)) && key <= end {
                 map.insert(key.clone(), value.clone());
             }
         }

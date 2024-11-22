@@ -227,11 +227,11 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 
                     self.write(entries.to_resp()).await?;
                 }
-                Command::Xread(stream_starts, blocking) => match blocking {
+                Command::Xread(stream_afters, blocking) => match blocking {
                     Some(block) => {
                         let res = self
                             .store
-                            .get_bulk_stream_entries_blocking(stream_starts, block)
+                            .get_bulk_stream_entries_blocking(stream_afters, block)
                             .await?;
 
                         match res {
@@ -248,7 +248,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         }
                     }
                     None => {
-                        let res = self.store.get_bulk_stream_entries(stream_starts).await?;
+                        let res = self.store.get_bulk_stream_entries(stream_afters).await?;
                         let resp = res
                             .iter()
                             .map(|x| (x.0.to_bulk_string(), x.1.to_resp()))

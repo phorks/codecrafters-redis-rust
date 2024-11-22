@@ -17,7 +17,7 @@ pub struct SetCommandOptions {
     pub exat: Option<u64>, // timestamp-seconds -- Set the specified Unix time at which the key will expire, in seconds (a positive integer).
     pub pxat: Option<u64>, // timestamp-milliseconds -- Set the specified Unix time at which the key will expire, in milliseconds (a positive integer).
     pub nx: bool,          // -- Only set the key if it does not already exist.
-    pub xx: bool,          // -- Only set the key if it already exists.
+    pub _xx: bool,         // -- Only set the key if it already exists.
     pub keepttl: bool,     // -- Retain the time to live associated with the key.
     pub get: bool, // -- Return the old string stored at key, or nil if key did not exist. An error is returned and SET aborted if the value stored at key is not a string.
 }
@@ -86,7 +86,7 @@ impl SetCommandOptions {
             exat,
             pxat,
             nx,
-            xx,
+            _xx: xx,
             keepttl,
             get,
         })
@@ -234,7 +234,7 @@ impl Command {
         async fn read_param<T: AsyncBufReadExt + Unpin>(
             lines: &mut Lines<T>,
         ) -> anyhow::Result<String> {
-            if let Some(bytes_line) = lines.next_line().await? {
+            if let Some(_) = lines.next_line().await? {
                 // println!("Received line: {}", bytes_line);
             }
 
