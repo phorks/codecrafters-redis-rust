@@ -457,7 +457,7 @@ impl Command {
 
                 let mid = rest.len() / 2;
                 for i in 0..mid {
-                    stream_starts.push((rest[i].clone(), rest[mid + 1].parse()?))
+                    stream_starts.push((rest[i].clone(), rest[mid + i].parse()?))
                 }
 
                 Ok(Command::Xread(stream_starts))
