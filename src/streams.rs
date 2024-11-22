@@ -154,6 +154,24 @@ impl FromStr for XaddStreamEntryId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum XreadStreamEntryId {
+    Id(StreamEntryId),
+    Future,
+}
+
+impl FromStr for XreadStreamEntryId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "$" {
+            Ok(Self::Future)
+        } else {
+            Ok(Self::Id(s.parse()?))
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct StreamQueryResponse(BTreeMap<StreamEntryId, HashMap<String, String>>);
 
@@ -255,9 +273,14 @@ impl StreamRecord {
 
     pub fn subscribe(
         &mut self,
-        entry_id: StreamEntryId,
+        entry_id: XreadStreamEntryId,
         tx: mpsc::Sender<(String, StreamQueryResponse)>,
     ) -> anyhow::Result<()> {
+        let entry_id = match entry_id {
+            XreadStreamEntryId::Id(entry_id) => entry_id,
+            XreadStreamEntryId::Future => self.top_entry_id.clone(),
+        };
+
         if entry_id < self.top_entry_id {
             anyhow::bail!("The data is available. There is no need for subscriptions.")
         }

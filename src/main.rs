@@ -59,7 +59,7 @@ async fn main() {
     let store = match create_database_from_file(&config).await {
         Ok(store) => store,
         Err(err) => {
-            eprintln!("Failed to read from the rdb file: {}", err);
+            eprintln!("{}", err);
             Database::new()
         }
     };

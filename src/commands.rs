@@ -7,7 +7,7 @@ use crate::{
     info::{InfoSection, InfoSectionKind},
     resp::RespMessage,
     server::ServerConfig,
-    streams::{StreamEntryId, XaddStreamEntryId},
+    streams::{StreamEntryId, XaddStreamEntryId, XreadStreamEntryId},
 };
 
 #[derive(Debug, Clone)]
@@ -225,7 +225,7 @@ pub enum Command {
     Type(String),
     Xadd(String, XaddStreamEntryId, HashMap<String, String>),
     Xrange(String, StreamEntryId, StreamEntryId),
-    Xread(Vec<(String, StreamEntryId)>, Option<XreadBlocking>),
+    Xread(Vec<(String, XreadStreamEntryId)>, Option<XreadBlocking>),
 }
 
 impl Command {
@@ -474,14 +474,14 @@ impl Command {
                     )
                 }
 
-                let mut stream_starts = vec![];
+                let mut stream_afters = vec![];
 
                 let mid = rest.len() / 2;
                 for i in 0..mid {
-                    stream_starts.push((rest[i].clone(), rest[mid + i].parse()?))
+                    stream_afters.push((rest[i].clone(), rest[mid + i].parse()?))
                 }
 
-                Ok(Command::Xread(stream_starts, blocking))
+                Ok(Command::Xread(stream_afters, blocking))
             }
             _ => anyhow::bail!("Unknown command"),
         }

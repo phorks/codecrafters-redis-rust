@@ -23,7 +23,10 @@ use crate::{
     commands::{SetCommandOptions, XreadBlocking},
     io_helper::skip_sequence,
     resp::RespMessage,
-    streams::{StreamEntryId, StreamQueryResponse, StreamRecord, StreamValue, XaddStreamEntryId},
+    streams::{
+        StreamEntryId, StreamQueryResponse, StreamRecord, StreamValue, XaddStreamEntryId,
+        XreadStreamEntryId,
+    },
 };
 
 #[derive(Debug)]
@@ -344,7 +347,7 @@ impl Database {
 
     pub async fn get_bulk_stream_entries(
         &self,
-        stream_afters: Vec<(String, StreamEntryId)>,
+        stream_afters: Vec<(String, XreadStreamEntryId)>,
     ) -> anyhow::Result<Vec<(String, StreamQueryResponse)>> {
         let mut res = vec![];
         let store = self.entries.read().await;
@@ -356,9 +359,13 @@ impl Database {
                 anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
             };
 
+            let XreadStreamEntryId::Id(start) = &start else {
+                continue;
+            };
+
             res.push((
                 key,
-                stream.get_entries_in_range(&start, &StreamEntryId::MAX, true),
+                stream.get_entries_in_range(start, &StreamEntryId::MAX, true),
             ));
         }
 
@@ -367,7 +374,7 @@ impl Database {
 
     pub async fn get_bulk_stream_entries_blocking(
         &self,
-        stream_afters: Vec<(String, StreamEntryId)>,
+        stream_afters: Vec<(String, XreadStreamEntryId)>,
         block: XreadBlocking,
     ) -> anyhow::Result<Option<Vec<(String, StreamQueryResponse)>>> {
         let mut responses = HashMap::new();
@@ -382,19 +389,31 @@ impl Database {
                 anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
             };
 
-            let entries = stream.get_entries_in_range(&start, &StreamEntryId::MAX, true);
+            let entries = match &start {
+                XreadStreamEntryId::Id(start) => {
+                    let entries = stream.get_entries_in_range(start, &StreamEntryId::MAX, true);
+                    if entries.is_empty() {
+                        None
+                    } else {
+                        Some(entries)
+                    }
+                }
+                XreadStreamEntryId::Future => None,
+            };
 
-            if entries.is_empty() {
-                responses.insert(key.clone(), None);
-                stream.subscribe(start.clone(), tx.clone()).unwrap();
-            } else {
-                responses.insert(key.clone(), Some(entries));
-                n_ready += 1;
+            match entries {
+                Some(entries) => {
+                    responses.insert(key.clone(), Some(entries));
+                    n_ready += 1;
+                }
+                None => {
+                    responses.insert(key.clone(), None);
+                    stream.subscribe(start.clone(), tx.clone()).unwrap();
+                }
             }
         }
         drop(store);
 
-        println!("Is this called?");
         if n_ready != stream_afters.len() {
             let n = stream_afters.len();
             let fut = async move {
@@ -402,8 +421,6 @@ impl Database {
                     let Some((key, entries)) = rx.recv().await else {
                         break;
                     };
-
-                    println!("Received entries {:?}", entries);
 
                     n_ready += 1;
                     responses.insert(key, Some(entries));
