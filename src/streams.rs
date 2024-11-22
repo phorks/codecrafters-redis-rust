@@ -277,6 +277,7 @@ impl StreamRecord {
             }
         }
 
+        println!("Unchecked {:?}", entry_id);
         self.top_entry_id = entry_id.clone();
 
         let old_listeners = std::mem::replace(&mut self.listeners, vec![]);
@@ -284,11 +285,12 @@ impl StreamRecord {
 
         for (waiting_for, tx) in old_listeners.into_iter() {
             if entry_id >= waiting_for {
-                tx.send((
-                    self.id.clone(),
-                    StreamQueryResponse([(entry_id.clone(), values.clone())].into()),
-                ))
-                .await;
+                let _ = tx
+                    .send((
+                        self.id.clone(),
+                        StreamQueryResponse([(entry_id.clone(), values.clone())].into()),
+                    ))
+                    .await;
             } else {
                 new_listeners.push((waiting_for, tx));
             }
