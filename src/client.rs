@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     commands::{Command, ReplConfData},
-    redis::{Database, RecordValue, EMPTY_RDB},
+    redis::{Database, RecordValue, TypeError, EMPTY_RDB},
     resp::RespMessage,
     resp_ext::{ToMapRespArray, ToStringResp},
     server::{ServerConfig, ServerRole},
@@ -255,6 +255,17 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                             .to_map_resp_array();
                         self.write(resp).await?;
                     }
+                },
+                Command::Incr(key) => match self.store.increase_integer(&key).await {
+                    Ok(i) => {
+                        self.write(RespMessage::Integer(i)).await?;
+                    }
+                    Err(e) => match e.downcast::<TypeError>() {
+                        Ok(e) => {
+                            self.write(e.to_resp()).await?;
+                        }
+                        Err(e) => return Err(e),
+                    },
                 },
             };
             n_commands += 1;

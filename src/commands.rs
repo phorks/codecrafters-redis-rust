@@ -226,6 +226,7 @@ pub enum Command {
     Xadd(String, XaddStreamEntryId, HashMap<String, String>),
     Xrange(String, StreamEntryId, StreamEntryId),
     Xread(Vec<(String, XreadStreamEntryId)>, Option<XreadBlocking>),
+    Incr(String),
 }
 
 impl Command {
@@ -482,6 +483,16 @@ impl Command {
                 }
 
                 Ok(Command::Xread(stream_afters, blocking))
+            }
+            "incr" => {
+                if n_params != 1 {
+                    anyhow::bail!(
+                        "Incorrect number of arguments for INCR (required 1, received {})",
+                        n_params
+                    )
+                }
+
+                Ok(Command::Incr(read_param(&mut lines).await?))
             }
             _ => anyhow::bail!("Unknown command"),
         }

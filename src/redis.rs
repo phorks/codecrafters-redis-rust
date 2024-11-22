@@ -1,6 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
-    str::FromStr,
+    collections::HashMap,
     time::{Duration, SystemTime},
 };
 
@@ -84,6 +83,30 @@ pub enum StringValue {
     Int32(u32),
 }
 
+impl StringValue {
+    pub fn new_increased(&self) -> anyhow::Result<StringValue> {
+        let new = match self {
+            StringValue::Str(_) => anyhow::bail!(TypeError::NotIntegerOrOutOfRange),
+            StringValue::Int8(i) => StringValue::Int8(i + 1),
+            StringValue::Int16(i) => StringValue::Int16(i + 1),
+            StringValue::Int32(i) => StringValue::Int32(i + 1),
+        };
+
+        Ok(new)
+    }
+
+    pub fn to_i64(&self) -> anyhow::Result<i64> {
+        let i = match self {
+            StringValue::Str(_) => anyhow::bail!(TypeError::NotIntegerOrOutOfRange),
+            StringValue::Int8(i) => *i as i64,
+            StringValue::Int16(i) => *i as i64,
+            StringValue::Int32(i) => *i as i64,
+        };
+
+        Ok(i)
+    }
+}
+
 impl<T: AsRef<str>> From<T> for StringValue {
     fn from(value: T) -> Self {
         StringValue::Str(value.as_ref().chars().map(|x| x as u8).collect())
@@ -100,6 +123,7 @@ impl ToString for StringValue {
         }
     }
 }
+
 async fn read_string<T: AsyncReadExt + Unpin>(buf: &mut T) -> anyhow::Result<StringValue> {
     match read_length(buf).await? {
         LengthValue::Length(length) => {
@@ -246,6 +270,28 @@ impl DatabaseEntry {
         } else {
             false
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum TypeError {
+    NotIntegerOrOutOfRange,
+}
+
+impl TypeError {
+    pub fn to_resp(&self) -> RespMessage {
+        let msg = match self {
+            TypeError::NotIntegerOrOutOfRange => "ERR value is not an integer or out of range",
+        };
+
+        RespMessage::SimpleError(String::from(msg))
+    }
+}
+
+impl std::fmt::Display for TypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Value is not an integer or is out of range.");
+        Ok(())
     }
 }
 
@@ -456,6 +502,24 @@ impl Database {
 
             Ok(Some(res))
         }
+    }
+
+    pub async fn increase_integer(&self, key: &str) -> anyhow::Result<i64> {
+        let mut store = self.entries.write().await;
+
+        let entry = store.entry(key.into()).or_insert_with(|| {
+            DatabaseEntry::new(EntryRecord::String(StringValue::Int32(0)), None)
+        });
+
+        let new = match &entry.record {
+            EntryRecord::String(s) => s.new_increased(),
+            EntryRecord::Stream(_) => Err(anyhow::anyhow!(TypeError::NotIntegerOrOutOfRange)),
+        }?;
+
+        let increased = new.to_i64()?;
+
+        entry.record = EntryRecord::String(new);
+        Ok(increased)
     }
 
     pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {
