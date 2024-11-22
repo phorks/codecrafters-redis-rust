@@ -11,7 +11,7 @@ use tokio::{
 use crate::{
     commands::{Command, ReplConfData},
     redis::{Database, EntryValue, EMPTY_RDB},
-    resp::{RespMessage, ToResp},
+    resp::RespMessage,
     resp_ext::{ToMapRespArray, ToStringResp},
     server::{ServerConfig, ServerRole},
     slave_proxy::{propagate_commands, receive_acks},
