@@ -15,7 +15,7 @@ pub const EMPTY_RDB: [u8; 88] = [
 
 use tokio::{
     io::AsyncReadExt,
-    sync::{mpsc, RwLock, RwLockWriteGuard},
+    sync::{mpsc, RwLock},
     time::timeout,
 };
 
@@ -207,12 +207,12 @@ impl From<Option<RecordValue>> for RespMessage {
 }
 
 pub struct DatabaseEntry {
-    pub record: EntryRecord,
+    record: EntryRecord,
     pub expires_on: Option<Expiry>,
 }
 
 impl DatabaseEntry {
-    pub fn new(value: EntryRecord, expires_on: Option<Expiry>) -> Self {
+    fn new(value: EntryRecord, expires_on: Option<Expiry>) -> Self {
         DatabaseEntry {
             record: value,
             expires_on,
@@ -402,7 +402,7 @@ impl Database {
                         break;
                     };
 
-                    println!("Received {:?}", entries);
+                    println!("Received entries {:?}", entries);
 
                     n_ready += 1;
                     responses.insert(key, Some(entries));
@@ -468,10 +468,10 @@ impl Database {
 }
 
 pub struct Instance {
-    pub version: [u8; 4],
-    pub metadata: HashMap<StringValue, StringValue>,
+    pub _version: [u8; 4],
+    pub _metadata: HashMap<StringValue, StringValue>,
     pub dbs: HashMap<usize, Database>,
-    pub checksum: [u8; 8],
+    pub _checksum: [u8; 8],
 }
 
 impl Instance {
@@ -496,12 +496,12 @@ impl Instance {
                     let index = read_numeric_length(&mut buf).await?;
                     _ = skip_sequence(&mut buf, &[0xFBu8]).await?;
                     let db_table_size = read_numeric_length(&mut buf).await?;
-                    let ex_table_size = read_numeric_length(&mut buf).await?;
+                    let _ex_table_size = read_numeric_length(&mut buf).await?;
                     let mut entries = HashMap::new();
 
-                    for i in 0..db_table_size {
+                    for _ in 0..db_table_size {
                         let mut expires_on = None;
-                        let value_type = match EntryFlag::from_buffer(&mut buf).await? {
+                        let _value_type = match EntryFlag::from_buffer(&mut buf).await? {
                             EntryFlag::ValueType(entry_value_type) => entry_value_type,
                             EntryFlag::ExpiresInSecs => {
                                 expires_on = Some(Expiry::InSecs(buf.read_u32_le().await?));
@@ -536,10 +536,10 @@ impl Instance {
                     let mut checksum = [0u8; 8];
                     buf.read_exact(&mut checksum).await?;
                     return Ok(Instance {
-                        version,
-                        metadata,
+                        _version: version,
+                        _metadata: metadata,
                         dbs,
-                        checksum,
+                        _checksum: checksum,
                     });
                 }
             }
