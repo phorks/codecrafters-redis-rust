@@ -3,7 +3,7 @@
 My repository for the CodeCrafters
 ["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis). 
 
-- Finished all 55 available stages, in 6 categories
+- Finished all 55 available stages, in 6 categories:
   1. Basic
   2. RDB Persistence
   3. Replication
