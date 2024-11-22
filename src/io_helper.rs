@@ -1,4 +1,4 @@
-use std::{cell::RefCell, pin::Pin, task::Poll};
+use std::{pin::Pin, task::Poll};
 
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader},

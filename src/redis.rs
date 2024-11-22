@@ -300,28 +300,6 @@ impl Database {
         }
     }
 
-    async fn with_stream<T, F: FnOnce(&mut StreamRecord) -> anyhow::Result<T>>(
-        &self,
-        key: &str,
-        f: F,
-    ) -> anyhow::Result<T> {
-        let mut store = self.entries.write().await;
-        let stream = store
-            .entry(key.clone().into())
-            .and_modify(|x| {
-                if x.is_expired() || matches!(x.record, EntryRecord::String(_)) {
-                    *x = DatabaseEntry::new_stream(String::from(key))
-                }
-            })
-            .or_insert_with(|| DatabaseEntry::new_stream(String::from(key)));
-
-        let EntryRecord::Stream(ref mut stream) = &mut stream.record else {
-            panic!("The entry is inserted in a way that its value must be stream");
-        };
-
-        f(stream)
-    }
-
     pub async fn add_stream_entry(
         &self,
         key: &str,
@@ -342,7 +320,6 @@ impl Database {
             panic!("The entry is inserted in a way that its value must be stream");
         };
 
-        eprintln!("{:?}", entry_id);
         Ok(stream.xadd(entry_id, values).await?)
     }
 
@@ -354,7 +331,7 @@ impl Database {
     ) -> anyhow::Result<StreamQueryResponse> {
         let store = self.entries.read().await;
 
-        let Some(stream) = store.get(&key.clone().into()) else {
+        let Some(stream) = store.get(&key.into()) else {
             return Ok(StreamQueryResponse::empty());
         };
 
@@ -409,7 +386,7 @@ impl Database {
 
             if entries.is_empty() {
                 responses.insert(key.clone(), None);
-                stream.subscribe(start.clone(), tx.clone());
+                stream.subscribe(start.clone(), tx.clone()).unwrap();
             } else {
                 responses.insert(key.clone(), Some(entries));
                 n_ready += 1;
@@ -424,6 +401,8 @@ impl Database {
                     let Some((key, entries)) = rx.recv().await else {
                         break;
                     };
+
+                    println!("Received {:?}", entries);
 
                     n_ready += 1;
                     responses.insert(key, Some(entries));

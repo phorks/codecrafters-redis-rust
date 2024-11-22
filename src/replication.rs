@@ -21,15 +21,15 @@ pub struct MasterConnection {
     pub read: Reader,
     pub write: OwnedWriteHalf,
     pub addr: SocketAddrV4,
-    pub rdb: Vec<u8>,
+    pub _rdb: Vec<u8>,
 }
 
 pub struct ReplicationChannel<Write: AsyncWriteExt + Unpin> {
     read: Reader,
     write: Write,
-    addr: SocketAddr,
+    _addr: SocketAddr,
     store: Arc<Database>,
-    config: Arc<ServerConfig>,
+    _config: Arc<ServerConfig>,
 }
 
 impl<Write: AsyncWriteExt + Unpin> ReplicationChannel<Write> {
@@ -83,9 +83,9 @@ impl ReplicationChannel<OwnedWriteHalf> {
         Self {
             read,
             write,
-            addr,
+            _addr: addr,
             store,
-            config,
+            _config: config,
         }
     }
 }
@@ -143,6 +143,6 @@ pub async fn connect_to_master(config: &ServerConfig) -> anyhow::Result<Option<M
         read,
         write,
         addr: master_addr,
-        rdb: buf,
+        _rdb: buf,
     }))
 }

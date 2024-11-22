@@ -269,7 +269,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 
     async fn run_as_slave_proxy(
         self,
-        port: u16,
+        _port: u16,
         repl_confs: Vec<ReplConfData>,
     ) -> anyhow::Result<()> {
         let ServerRole::Master(master) = &self.config.role else {
@@ -305,7 +305,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 }
 
 impl Client<BufReader<OwnedReadHalf>, OwnedWriteHalf> {
-    pub fn new(
+    pub fn _new(
         read: BufReader<OwnedReadHalf>,
         write: OwnedWriteHalf,
         addr: SocketAddr,
