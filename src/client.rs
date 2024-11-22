@@ -321,19 +321,9 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                 self.write("OK".to_simple_string()).await?;
             }
             Command::Exec => {
-                // { match &self.queued_commands {
-                // Some(queue) => {
-                //     if queue.len() == 0 {
-                //         self.write(RespMessage::Array(vec![])).await?;
-                //     }
-                //     self.queued_commands = None
-                // }
-                // None => {
                 println!("Bad EXEC");
                 self.write("ERR EXEC without MULTI".to_simple_error())
                     .await?;
-                // }
-                // }
             }
             Command::Discard => {
                 self.write("ERR DISCARD without MULTI".to_simple_error())
