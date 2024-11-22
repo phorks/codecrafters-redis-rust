@@ -219,6 +219,7 @@ pub enum Command {
     Type(String),
     Xadd(String, XaddStreamEntryId, HashMap<String, String>),
     Xrange(String, StreamEntryId, StreamEntryId),
+    Xread(Vec<(String, StreamEntryId)>),
 }
 
 impl Command {
@@ -356,7 +357,7 @@ impl Command {
             "psync" => {
                 if n_params != 2 {
                     anyhow::bail!(
-                        "Incorrect number of parameters for psync (required 2, received {})",
+                        "Incorrect number of parameters for PSYNC (required 2, received {})",
                         n_params
                     )
                 }
@@ -382,7 +383,7 @@ impl Command {
             "type" => {
                 if n_params != 1 {
                     anyhow::bail!(
-                        "Incorrect number of arguments for WAIT (required 1, received {})",
+                        "Incorrect number of arguments for TYPE (required 1, received {})",
                         n_params
                     )
                 }
@@ -394,7 +395,7 @@ impl Command {
             "xadd" => {
                 if n_params < 2 {
                     anyhow::bail!(
-                        "Incorrect number of arguments for WAIT (required at least 2, received {})",
+                        "Incorrect number of arguments for XADD (required at least 2, received {})",
                         n_params
                     )
                 }
@@ -422,7 +423,7 @@ impl Command {
             "xrange" => {
                 if n_params != 3 {
                     anyhow::bail!(
-                        "Incorrect number of arguments for WAIT (required 3, received {})",
+                        "Incorrect number of arguments for XRANGE (required 3, received {})",
                         n_params
                     )
                 }
@@ -432,6 +433,34 @@ impl Command {
                 let end = StreamEntryId::parse_as_range_end(&read_param(&mut lines).await?)?;
 
                 Ok(Command::Xrange(key, start, end))
+            }
+            "xread" => {
+                let mut n_read = 0;
+                loop {
+                    let param = read_param(&mut lines).await?;
+                    n_read += 1;
+                    if param == "streams" {
+                        break;
+                    }
+                }
+
+                let rest = read_rest_params(&mut lines, n_params - n_read).await?;
+
+                if rest.len() % 2 != 0 {
+                    anyhow::bail!(
+                        "Incorrect number of stream_key+ids for XREAD (required even amount, received {})",
+                        rest.len()
+                    )
+                }
+
+                let mut stream_starts = vec![];
+
+                let mid = rest.len() / 2;
+                for i in 0..mid {
+                    stream_starts.push((rest[i].clone(), rest[mid + 1].parse()?))
+                }
+
+                Ok(Command::Xread(stream_starts))
             }
             _ => anyhow::bail!("Unknown command"),
         }

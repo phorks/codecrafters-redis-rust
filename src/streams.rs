@@ -5,7 +5,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::resp::RespMessage;
+use crate::{
+    resp::RespMessage,
+    resp_ext::{ToMapRespArray, ToStringResp},
+};
 
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Debug)]
 pub struct StreamEntryId {
@@ -42,6 +45,11 @@ impl StreamEntryId {
         }
     }
 
+    pub const MAX: Self = Self {
+        millis: u64::MAX,
+        seq_no: u64::MAX,
+    };
+
     pub fn is_min(&self) -> bool {
         self.millis == 0 && self.seq_no == 0
     }
@@ -50,6 +58,23 @@ impl StreamEntryId {
 impl ToString for StreamEntryId {
     fn to_string(&self) -> String {
         format!("{}-{}", self.millis, self.seq_no)
+    }
+}
+
+impl FromStr for StreamEntryId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (millis_str, seq_no_str) = s.split_once('-').ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid entry ID format (it must consist of two parts separated by a '-'"
+            )
+        })?;
+
+        let millis = millis_str.parse()?;
+        let seq_no = seq_no_str.parse()?;
+
+        Ok(Self::new(millis, seq_no))
     }
 }
 
@@ -127,6 +152,24 @@ impl FromStr for XaddStreamEntryId {
     }
 }
 
+pub struct StreamQueryResponse(BTreeMap<StreamEntryId, HashMap<String, String>>);
+
+impl StreamQueryResponse {
+    pub fn to_resp(&self) -> RespMessage {
+        self.0
+            .iter()
+            .map(|x| {
+                (
+                    x.0.to_bulk_string(),
+                    x.1.iter()
+                        .map(|y| (y.0.to_bulk_string(), y.1.to_bulk_string()))
+                        .to_flattened_map_resp_array(),
+                )
+            })
+            .to_map_resp_array()
+    }
+}
+
 #[derive(Clone)]
 pub struct StreamValue {
     entries: HashMap<StreamEntryId, HashMap<String, String>>,
@@ -171,7 +214,7 @@ impl StreamValue {
         &self,
         start: &StreamEntryId,
         end: &StreamEntryId,
-    ) -> BTreeMap<StreamEntryId, HashMap<String, String>> {
+    ) -> StreamQueryResponse {
         // FIXME this is approach is inefficient. It is of O(n + mlogm) where n is
         // the total number of entries in the stream and m is the number of entries in the given range.
         // Redis does it in O(m), while keeping entry insertion in O(1) by leveraging Radix tries
@@ -183,7 +226,7 @@ impl StreamValue {
             }
         }
 
-        map
+        StreamQueryResponse(map)
     }
 
     fn add_entry_unchecked(

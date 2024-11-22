@@ -209,7 +209,7 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
 
                     match result {
                         Ok(entry_id) => {
-                            self.write(entry_id.to_resp()).await?;
+                            self.write(entry_id.to_bulk_string()).await?;
                         }
                         Err(e) => match e.downcast::<InvalidStreamEntryId>() {
                             Ok(e) => {
@@ -225,18 +225,14 @@ impl<Read: AsyncBufReadExt + Unpin + Send + 'static, Write: AsyncWrite + Unpin>
                         .get_stream_entries_in_range(&key, start, end)
                         .await?;
 
-                    let resp = entries
+                    self.write(entries.to_resp()).await?;
+                }
+                Command::Xread(stream_starts) => {
+                    let res = self.store.get_bulk_stream_entries(stream_starts).await?;
+                    let resp = res
                         .iter()
-                        .map(|x| {
-                            (
-                                x.0.to_bulk_string(),
-                                x.1.iter()
-                                    .map(|y| (y.0.to_bulk_string(), y.1.to_bulk_string()))
-                                    .to_flattened_map_resp_array(),
-                            )
-                        })
+                        .map(|x| (x.0.to_bulk_string(), x.1.to_resp()))
                         .to_map_resp_array();
-
                     self.write(resp).await?;
                 }
             };

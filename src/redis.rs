@@ -22,7 +22,7 @@ use crate::{
     commands::SetCommandOptions,
     io_helper::skip_sequence,
     resp::RespMessage,
-    streams::{StreamEntryId, StreamValue, XaddStreamEntryId},
+    streams::{StreamEntryId, StreamQueryResponse, StreamValue, XaddStreamEntryId},
 };
 
 #[derive(Debug)]
@@ -319,11 +319,37 @@ impl Database {
         key: &str,
         start: StreamEntryId,
         end: StreamEntryId,
-    ) -> anyhow::Result<BTreeMap<StreamEntryId, HashMap<String, String>>> {
+    ) -> anyhow::Result<StreamQueryResponse> {
+        // FIXME: with_stream will unnecessarily create the stream if it doesn't exists or
+        // replace it if the key is a string value. It makes sense for add but not for queries.
+        // We also don't need to acquire WRITE lock to respond to the query
         self.with_stream(key, move |stream| {
             Ok(stream.get_entries_in_range(&start, &end))
         })
         .await
+    }
+
+    pub async fn get_bulk_stream_entries(
+        &self,
+        stream_starts: Vec<(String, StreamEntryId)>,
+    ) -> anyhow::Result<Vec<(String, StreamQueryResponse)>> {
+        let mut res = vec![];
+        let store = self.entries.read().await;
+        for (key, start) in stream_starts.into_iter() {
+            let Some(stream) = store.get(&key.clone().into()) else {
+                continue;
+            };
+            let EntryValue::Stream(ref stream) = &stream.value else {
+                anyhow::bail!("The key refers to a non-stream entry. Key: {}", &key);
+            };
+
+            res.push((
+                key,
+                stream.get_entries_in_range(&start, &StreamEntryId::MAX),
+            ));
+        }
+
+        Ok(res)
     }
 
     pub async fn get_keys(&self) -> anyhow::Result<Vec<StringValue>> {

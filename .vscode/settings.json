@@ -16,6 +16,7 @@
         "replicaof",
         "replid",
         "Xadd",
-        "Xrange"
+        "Xrange",
+        "Xread"
     ]
 }

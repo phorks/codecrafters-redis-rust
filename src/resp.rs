@@ -18,57 +18,6 @@ pub enum RespMessage {
     SimpleError(String),
 }
 
-pub trait ToResp {
-    fn to_resp(&self) -> RespMessage;
-}
-
-impl ToResp for &str {
-    fn to_resp(&self) -> RespMessage {
-        RespMessage::bulk_from_str(&self.as_ref())
-    }
-}
-
-impl ToResp for String {
-    fn to_resp(&self) -> RespMessage {
-        RespMessage::BulkString(self.clone())
-    }
-}
-
-impl ToResp for StreamEntryId {
-    fn to_resp(&self) -> RespMessage {
-        self.to_string().to_resp()
-    }
-}
-
-impl<K: ToResp, V: ToResp> ToResp for HashMap<K, V> {
-    fn to_resp(&self) -> RespMessage {
-        let items = self
-            .into_iter()
-            .flat_map(|x| [x.0.to_resp(), x.1.to_resp()])
-            .collect();
-
-        RespMessage::Array(items)
-    }
-}
-
-impl<K: ToResp, V: ToResp> ToResp for BTreeMap<K, V> {
-    fn to_resp(&self) -> RespMessage {
-        let items = self
-            .into_iter()
-            .flat_map(|x| [x.0.to_resp(), x.1.to_resp()])
-            .collect();
-
-        RespMessage::Array(items)
-    }
-}
-
-impl<V: ToResp> ToResp for Vec<V> {
-    fn to_resp(&self) -> RespMessage {
-        let items = self.into_iter().map(|x| x.to_resp()).collect();
-        RespMessage::Array(items)
-    }
-}
-
 impl RespMessage {
     pub fn bulk_from_str(value: &str) -> Self {
         RespMessage::BulkString(String::from(value))
